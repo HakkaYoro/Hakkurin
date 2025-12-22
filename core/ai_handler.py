@@ -170,13 +170,16 @@ class GeminiBrain:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
         return None
 
-    async def analyze_interaction(self, user_message, user_memory, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None):
+    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
         Soporta imágenes (multimodal).
         """
         # Registrar uso antes de llamar (optimista)
         self._get_usage(self.current_key_index).register_request()
+        
+        # Importar memory aquí para evitar ciclos
+        from core.memory_manager import memory
 
         system_prompt = config.get("system_prompt")
         bot_name = config.get("bot_name")
@@ -185,7 +188,49 @@ class GeminiBrain:
         # Calcular Timestamp GMT-4
         from datetime import datetime, timezone, timedelta
         tz_gmt_minus_4 = timezone(timedelta(hours=-4))
-        current_time = datetime.now(tz_gmt_minus_4).strftime("%Y-%m-%d %H:%M:%S (GMT-4)")
+        now = datetime.now(tz_gmt_minus_4)
+        current_time = now.strftime("%Y-%m-%d %H:%M:%S (GMT-4)")
+        
+        # Calcular Edad del Bot (Nacimiento: 2025-12-22 02:32 GMT-4)
+        birth_date = datetime(2025, 12, 22, 2, 32, tzinfo=tz_gmt_minus_4)
+        age_delta = now - birth_date
+        days = age_delta.days
+        hours = age_delta.seconds // 3600
+        minutes = (age_delta.seconds % 3600) // 60
+        bot_age_str = f"{days} días, {hours} horas y {minutes} minutos"
+
+        # Extraer IDs de usuarios del historial para cargar sus perfiles
+        # Formato esperado en historial: "Nombre (ID: 12345): mensaje"
+        import re
+        unique_user_ids = set()
+        unique_user_ids.add(str(user_id)) # Añadir usuario actual
+        
+        for msg in context_messages:
+            match = re.search(r"\(ID: (\d+)\)", msg)
+            if match:
+                unique_user_ids.add(match.group(1))
+        
+        # Construir sección de perfiles
+        profiles_text = ""
+        for uid in unique_user_ids:
+            summary = memory.get_memory_summary(uid)
+            if summary.strip():
+                profiles_text += f"--- PERFIL DE USUARIO ID {uid} ---\n{summary}\n"
+
+        # Gestión de Tokens (Límite ~240k tokens -> ~900k caracteres)
+        # Si el historial es muy largo, cortamos los mensajes más antiguos
+        MAX_CHARS = 900000
+        history_text = chr(10).join(context_messages)
+        
+        if len(history_text) > MAX_CHARS:
+            # Cortar aproximadamente
+            excess = len(history_text) - MAX_CHARS
+            history_text = history_text[excess:]
+            # Ajustar al primer salto de línea para no cortar mensaje a la mitad
+            first_newline = history_text.find('\n')
+            if first_newline != -1:
+                history_text = history_text[first_newline+1:]
+            print(f"Historial truncado por límite de tokens. Longitud actual: {len(history_text)}")
 
         text_prompt = f"""
 {system_prompt}
@@ -197,14 +242,19 @@ RELACIÓN CON HAKKA: Trátalo con cariño de hija ("hablar bonito").
 IMPORTANTE: En el historial verás mensajes como "Nombre (ID: 12345): mensaje". Si hay varios usuarios con el mismo nombre, usa el ID para diferenciarlos. El ID es único.
 
 FECHA Y HORA ACTUAL: {current_time}
+TU EDAD: {bot_age_str}
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
-- Memoria del Usuario: {user_memory}
+
+CONTEXTO DE USUARIOS EN EL CHAT (Memorias):
+{profiles_text}
 
 HISTORIAL RECIENTE:
-{chr(10).join(context_messages)}
-Usuario: "{user_message}"
+{history_text}
+MENSAJE ACTUAL:
+Usuario: {user_name} (ID: {user_id})
+Contenido: "{user_text}"
 [IMAGEN ADJUNTA]: {"SÍ" if image_data else "NO"}
 
 TU TAREA:

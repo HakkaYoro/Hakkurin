@@ -135,7 +135,13 @@ class ConversationManager:
                 fake_msg = "[SISTEMA]: El usuario ha dejado de responder por 5 minutos. ¿Quieres decir algo antes de irte? (Si no, responde con intent: ignore)"
                 
                 try:
-                    analysis = await brain.analyze_interaction(fake_msg, mem_summary, channel_history, is_session_active=True)
+                    analysis = await brain.analyze_interaction(
+                        user_text=fake_msg,
+                        user_id=session.user_id,
+                        user_name="System",
+                        context_messages=channel_history,
+                        is_session_active=True
+                    )
                     
                     response_content = analysis.get("response_content", [])
                     # Normalizar a lista si es string

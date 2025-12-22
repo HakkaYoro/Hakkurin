@@ -186,9 +186,10 @@ class HakkurinBot(discord.Client):
 
         # Análisis de IA
         analysis = await brain.analyze_interaction(
-            user_text, 
-            mem_summary, 
-            channel_history, # Pasamos el historial global
+            user_text=user_text,
+            user_id=user_id,
+            user_name=user_name,
+            context_messages=channel_history, # Pasamos el historial global
             is_session_active=session.is_active,
             image_data=image_data,
             image_mime_type=image_mime_type
