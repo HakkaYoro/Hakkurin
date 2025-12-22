@@ -394,5 +394,19 @@ Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. T
         # Devolver None si falló para no borrar el buffer accidentalmente
         return result
 
+    async def test_api_connection(self):
+        """
+        Prueba simple para verificar si la API está respondiendo y tenemos quota.
+        Devuelve True si éxito, False si falla.
+        """
+        try:
+            # Usar un prompt mínimo para gastar pocos tokens
+            config_gen = types.GenerateContentConfig(max_output_tokens=5)
+            await self._generate_with_retry("ping", config_gen, is_json=False)
+            return True
+        except Exception as e:
+            print(f"Test de API fallido: {e}")
+            return False
+
 # Instancia global
 brain = GeminiBrain()

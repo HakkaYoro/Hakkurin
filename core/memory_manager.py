@@ -86,8 +86,9 @@ class MemoryManager:
         mem["interaction_count"] += 1
         
         now = time.time()
-        # Resumir si han pasado 3 horas (10800s) desde el último resumen Y hay buffer
-        should_summarize = (now - mem["last_summary_time"] > 10800) and len(mem["history_buffer"]) > 0
+        # Resumir SOLO si hay 20 o más mensajes en el buffer (Batch processing)
+        # Esto ahorra API calls como solicitó el usuario.
+        should_summarize = len(mem["history_buffer"]) >= 20
         
         self.save_memory(user_id, mem)
         
