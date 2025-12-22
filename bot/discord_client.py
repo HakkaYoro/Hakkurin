@@ -202,7 +202,7 @@ class HakkurinBot(discord.Client):
                 await asyncio.sleep(random.uniform(0.2, 0.5))
             
             # Añadir respuesta completa al contexto GLOBAL
-            conversation_manager.get_channel_context(message.channel.id).add_message(config.get('bot_name'), full_response_text.strip())
+            conversation_manager.get_channel_context(message.channel.id).add_message(config.get('bot_name'), str(self.user.id), full_response_text.strip())
             
             # Actualizar memoria (fire and forget)
             asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, full_response_text.strip()))

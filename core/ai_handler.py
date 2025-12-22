@@ -172,6 +172,7 @@ class GeminiBrain:
         full_prompt = f"""
 {system_prompt}
 NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. Trátalo con especial respeto o cariño según tu personalidad.
+IMPORTANTE: En el historial verás mensajes como "Nombre (ID: 12345): mensaje". Si hay varios usuarios con el mismo nombre, usa el ID para diferenciarlos. El ID es único.
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).

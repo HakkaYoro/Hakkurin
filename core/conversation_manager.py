@@ -42,9 +42,9 @@ class ChannelContext:
         self.channel_id = channel_id
         self.messages = [] # Lista de dicts: {'timestamp': float, 'content': str, 'author': str}
 
-    def add_message(self, author_name, content):
+    def add_message(self, author_name, author_id, content):
         now = time.time()
-        self.messages.append({'timestamp': now, 'content': content, 'author': author_name})
+        self.messages.append({'timestamp': now, 'content': content, 'author': author_name, 'author_id': author_id})
         self._cleanup(now)
 
     def _cleanup(self, now):
@@ -53,7 +53,8 @@ class ChannelContext:
         self.messages = [msg for msg in self.messages if msg['timestamp'] > cutoff][-50:]
 
     def get_formatted_history(self):
-        return [f"{msg['author']}: {msg['content']}" for msg in self.messages]
+        # Formato: Nombre (ID: 12345): Mensaje
+        return [f"{msg['author']} (ID: {msg['author_id']}): {msg['content']}" for msg in self.messages]
 
 class ConversationManager:
     _instance = None
@@ -89,7 +90,7 @@ class ConversationManager:
         
         # Actualizar contexto del canal si hay mensaje
         if user_name and message_content:
-            self.get_channel_context(channel_id).add_message(user_name, message_content)
+            self.get_channel_context(channel_id).add_message(user_name, user_id, message_content)
             # También añadimos al contexto personal por si acaso, aunque usaremos el global
             self.sessions[key].add_context(f"{user_name}: {message_content}")
 
