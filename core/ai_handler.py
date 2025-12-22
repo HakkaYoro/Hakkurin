@@ -170,9 +170,10 @@ class GeminiBrain:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
         return None
 
-    async def analyze_interaction(self, user_message, user_memory, context_messages=[], is_session_active=False):
+    async def analyze_interaction(self, user_message, user_memory, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
+        Soporta imágenes (multimodal).
         """
         # Registrar uso antes de llamar (optimista)
         self._get_usage(self.current_key_index).register_request()
@@ -186,7 +187,7 @@ class GeminiBrain:
         tz_gmt_minus_4 = timezone(timedelta(hours=-4))
         current_time = datetime.now(tz_gmt_minus_4).strftime("%Y-%m-%d %H:%M:%S (GMT-4)")
 
-        full_prompt = f"""
+        text_prompt = f"""
 {system_prompt}
 NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. SU NOMBRE ES "Hakka".
 RELACIÓN CON HAKKA: Trátalo con cariño de hija ("hablar bonito").
@@ -204,9 +205,10 @@ ESTADO ACTUAL:
 HISTORIAL RECIENTE:
 {chr(10).join(context_messages)}
 Usuario: "{user_message}"
+[IMAGEN ADJUNTA]: {"SÍ" if image_data else "NO"}
 
 TU TAREA:
-Analiza el mensaje del usuario y decide tu reacción. Responde EXCLUSIVAMENTE con un objeto JSON válido con este formato:
+Analiza el mensaje del usuario (y la imagen si la hay) y decide tu reacción. Responde EXCLUSIVAMENTE con un objeto JSON válido con este formato:
 {{
   "is_talking_to_me": boolean, // True si el mensaje va dirigido a ti o es relevante para la conversación actual. False si hablan de otra cosa.
   "intent": "reply" | "ignore" | "complain" | "new_topic", // "reply": responder normal. "ignore": no hacer nada. "complain": quejarse porque te ignoran o te molestan. "new_topic": cambiar de tema.
@@ -240,7 +242,12 @@ REGLAS DE COMPORTAMIENTO:
             response_mime_type="application/json"
         )
 
-        result = await self._generate_with_retry(full_prompt, config_gen, is_json=True)
+        # Construir contenido (texto + imagen opcional)
+        contents = [text_prompt]
+        if image_data and image_mime_type:
+            contents.append(types.Part.from_bytes(data=image_data, mime_type=image_mime_type))
+
+        result = await self._generate_with_retry(contents, config_gen, is_json=True)
         
         if result:
             return result

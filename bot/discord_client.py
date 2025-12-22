@@ -168,12 +168,30 @@ class HakkurinBot(discord.Client):
         # Esto permite ver la conversación entre múltiples usuarios
         channel_history = conversation_manager.get_channel_context(message.channel.id).get_formatted_history()
         
+        # PROCESAR IMÁGENES (Multimodal)
+        image_data = None
+        image_mime_type = None
+        
+        if message.attachments:
+            for attachment in message.attachments:
+                # Filtrar por extensiones permitidas y tamaño razonable (< 4MB para no saturar)
+                if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
+                    try:
+                        print(f"Descargando imagen: {attachment.filename}")
+                        image_data = await attachment.read()
+                        image_mime_type = attachment.content_type or "image/jpeg"
+                        break # Solo procesamos la primera imagen por ahora
+                    except Exception as e:
+                        print(f"Error descargando imagen: {e}")
+
         # Análisis de IA
         analysis = await brain.analyze_interaction(
             user_text, 
             mem_summary, 
             channel_history, # Pasamos el historial global
-            is_session_active=session.is_active
+            is_session_active=session.is_active,
+            image_data=image_data,
+            image_mime_type=image_mime_type
         )
         
         print(f"Análisis para {user_name}: {analysis}")
