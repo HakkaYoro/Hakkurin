@@ -1,0 +1,17 @@
+services:
+  hakkurin:
+    build: .
+    container_name: hakkurin_bot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistencia de memoria y configuración
+      - ./memory:/app/memory
+      - ./config.json:/app/config.json
+      - ./hakkurin.log:/app/hakkurin.log
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Opcional: Si usas .env para otras cosas
+    # env_file:
+    #   - .env
