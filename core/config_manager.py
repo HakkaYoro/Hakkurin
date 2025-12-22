@@ -1,7 +1,7 @@
 import json
 import os
 
-CONFIG_FILE = "config.json"
+CONFIG_FILE = "data/config.json"
 
 class ConfigManager:
     _instance = None
@@ -10,6 +10,8 @@ class ConfigManager:
         if cls._instance is None:
             cls._instance = super(ConfigManager, cls).__new__(cls)
             cls._instance.config = {}
+            # Asegurar que el directorio data existe
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
             cls._instance.load_config()
         return cls._instance
 

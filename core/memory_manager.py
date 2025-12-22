@@ -2,8 +2,8 @@ import os
 import json
 from cryptography.fernet import Fernet
 
-MEMORY_DIR = "memory/users"
-KEY_FILE = "memory/secret.key"
+MEMORY_DIR = "data/memory/users"
+KEY_FILE = "data/memory/secret.key"
 
 class MemoryManager:
     def __init__(self):
