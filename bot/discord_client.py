@@ -450,11 +450,16 @@ class HakkurinBot(discord.Client):
     async def process_memory_queue_task(self):
         """Procesa la cola de memoria temporal cada minuto."""
         try:
-            # Mover items viejos (>30min) a permanente
-            users_to_summarize = await asyncio.to_thread(memory.process_queue)
+            # 1. Mover items viejos (>5min) a permanente
+            # Esto retorna usuarios que cumplieron criterio en add_interaction (20 msgs o >6h al momento de insertar)
+            users_to_summarize = set(await asyncio.to_thread(memory.process_queue))
+            
+            # 2. Revisar usuarios que NO han hablado recientemente pero tienen buffer viejo (>6h)
+            stale_users = await asyncio.to_thread(memory.check_stale_buffers)
+            users_to_summarize.update(stale_users)
             
             if users_to_summarize:
-                print(f"Procesando resumen diferido para {len(users_to_summarize)} usuarios...")
+                print(f"Procesando resumen para {len(users_to_summarize)} usuarios (Batch/Stale)...")
                 for uid in users_to_summarize:
                     asyncio.create_task(self.perform_memory_summarization(uid))
         except Exception as e:

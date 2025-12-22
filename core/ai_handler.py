@@ -437,33 +437,32 @@ Solo el texto del mensaje.
         self._get_usage(self.current_key_index).register_request()
 
         prompt = f"""
-TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil psicológico y factual de un usuario.
-NOTA: El desarrollador/creador de la IA es el usuario con ID: 321799812595056645. Su nombre es "Hakka". La IA debe llamarlo "Hakka-sama".
+TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil del usuario.
+NOTA: El desarrollador es "Hakka" (ID: 321799812595056645).
 
 DATOS DEL USUARIO:
 ID de Discord: {user_id}
 
-RESUMEN ACTUAL (Lo que sabíamos hasta ahora):
-{current_summary if current_summary else "No hay información previa."}
+RESUMEN ACTUAL:
+{current_summary if current_summary else "Sin datos previos."}
 
-NUEVAS INTERACCIONES (Últimas 3 horas):
+NUEVAS INTERACCIONES:
 {chr(10).join(recent_interactions)}
 
 INSTRUCCIONES:
-1. Analiza las nuevas interacciones y combínalas con el resumen actual.
-2. Genera un NUEVO RESUMEN DETALLADO Y EXTENSO (El más largo posible, sin perder detalle).
-3. DEBE INCLUIR EXPLÍCITAMENTE:
-   - Discord User ID: {user_id}
-   - Nombre(s) y Apodos.
-   - Edad y Género (si se mencionan o infieren).
-   - Personalidad del usuario.
-   - Gustos y Disgustos detallados.
-   - OPINIÓN DE HAKKURIN SOBRE EL USUARIO (¿Le cae bien? ¿Es molesto? ¿Es su padre?).
-   - Temas de conversación importantes.
-4. Si hay información contradictoria, prioriza la más reciente pero anota la contradicción.
+1. Actualiza el perfil con los nuevos datos.
+2. Sé EXTREMADAMENTE CONCISO y DIRECTO. Usa bullet points.
+3. Si no hay información sobre un aspecto (ej. edad, gustos), NO LO MENCIONES. No escribas "No se sabe la edad". Simplemente omítelo.
+4. Si no hay NADA de información relevante (ni previa ni nueva), devuelve SOLO el string: "Sin información suficiente."
+5. Estructura deseada (solo si hay datos):
+   - Alias: [Nombre]
+   - Datos: [Edad, Género, etc.]
+   - Personalidad: [Rasgos observados]
+   - Gustos: [Lista corta]
+   - Relación: [Opinión de Hakkurin]
 
 SALIDA:
-Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. Texto plano estructurado.
+Solo el texto del resumen.
 """
         config_gen = types.GenerateContentConfig(
             temperature=0.3,
