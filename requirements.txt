@@ -1,0 +1,8 @@
+discord.py
+google-genai
+cryptography
+fastapi
+uvicorn
+python-dotenv
+jinja2
+python-multipart
