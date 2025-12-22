@@ -104,6 +104,23 @@ class ConversationManager:
 
         return self.sessions[key]
 
+    def get_active_users(self, channel_id, minutes=20):
+        """
+        Devuelve una lista de IDs de usuarios que han estado activos en el canal en los últimos X minutos.
+        """
+        active_ids = set()
+        channel_ctx = self.get_channel_context(channel_id)
+        
+        now = time.time()
+        cutoff = now - (minutes * 60)
+        
+        # Iterar mensajes del canal (que ya están limpios a 1h, así que es rápido)
+        for msg in channel_ctx.messages:
+            if msg['timestamp'] > cutoff:
+                active_ids.add(str(msg['author_id']))
+                
+        return list(active_ids)
+
     def end_session(self, channel_id, user_id):
         key = (channel_id, user_id)
         if key in self.sessions:

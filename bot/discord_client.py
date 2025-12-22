@@ -168,6 +168,13 @@ class HakkurinBot(discord.Client):
         # Esto permite ver la conversación entre múltiples usuarios
         channel_history = conversation_manager.get_channel_context(message.channel.id).get_formatted_history()
         
+        # OBTENER USUARIOS ACTIVOS (Contexto Dinámico 20 min)
+        active_user_ids = conversation_manager.get_active_users(message.channel.id, minutes=20)
+        # Añadir usuarios mencionados explícitamente en este mensaje
+        for mention in message.mentions:
+            if not mention.bot:
+                active_user_ids.append(str(mention.id))
+        
         # PROCESAR IMÁGENES (Multimodal)
         image_data = None
         image_mime_type = None
@@ -192,7 +199,8 @@ class HakkurinBot(discord.Client):
             context_messages=channel_history, # Pasamos el historial global
             is_session_active=session.is_active,
             image_data=image_data,
-            image_mime_type=image_mime_type
+            image_mime_type=image_mime_type,
+            active_user_ids=active_user_ids
         )
         
         print(f"Análisis para {user_name}: {analysis}")
@@ -340,7 +348,7 @@ class HakkurinBot(discord.Client):
             current_summary, buffer = memory.get_buffer_and_summary(user_id)
             if not buffer: return
 
-            new_summary = await brain.generate_summary(current_summary, buffer)
+            new_summary = await brain.generate_summary(current_summary, buffer, user_id)
             
             if new_summary:
                 memory.update_summary(user_id, new_summary)

@@ -73,17 +73,22 @@ class MemoryManager:
         }
 
     def add_interaction(self, user_id, interaction_text):
-        """Añade una interacción al buffer y devuelve True si es hora de resumir."""
+        """Añade una interacción al buffer y devuelve True si es hora de resumir (cada 3h)."""
+        import time
         mem = self.get_memory(user_id)
         
         # Asegurar que existan los campos nuevos en memorias viejas
         if "history_buffer" not in mem: mem["history_buffer"] = []
         if "summary" not in mem: mem["summary"] = ""
+        if "last_summary_time" not in mem: mem["last_summary_time"] = 0
         
         mem["history_buffer"].append(interaction_text)
         mem["interaction_count"] += 1
         
-        should_summarize = len(mem["history_buffer"]) >= 20
+        now = time.time()
+        # Resumir si han pasado 3 horas (10800s) desde el último resumen Y hay buffer
+        should_summarize = (now - mem["last_summary_time"] > 10800) and len(mem["history_buffer"]) > 0
+        
         self.save_memory(user_id, mem)
         
         return should_summarize
@@ -93,11 +98,29 @@ class MemoryManager:
         return mem.get("summary", ""), mem.get("history_buffer", [])
 
     def update_summary(self, user_id, new_summary):
-        """Actualiza el resumen y limpia el buffer."""
+        """Actualiza el resumen, limpia el buffer y guarda archivo plano."""
+        import time
         mem = self.get_memory(user_id)
         mem["summary"] = new_summary
         mem["history_buffer"] = [] # Limpiar buffer
+        mem["last_summary_time"] = time.time()
         self.save_memory(user_id, mem)
+        
+        # Guardar copia plana del resumen
+        self._save_summary_plaintext(user_id, new_summary)
+
+    def _save_summary_plaintext(self, user_id, summary_text):
+        """Guarda el resumen en un archivo de texto plano visible."""
+        SUMMARY_DIR = "data/memory/summaries"
+        if not os.path.exists(SUMMARY_DIR):
+            os.makedirs(SUMMARY_DIR)
+            
+        file_path = os.path.join(SUMMARY_DIR, f"{user_id}.txt")
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(summary_text)
+        except Exception as e:
+            print(f"Error guardando resumen plano de {user_id}: {e}")
 
     def get_users_with_pending_buffer(self):
         """Devuelve una lista de user_ids que tienen mensajes en el buffer sin resumir."""

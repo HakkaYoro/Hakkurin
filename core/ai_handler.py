@@ -170,10 +170,10 @@ class GeminiBrain:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
         return None
 
-    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None):
+    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None, active_user_ids=None):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
-        Soporta imágenes (multimodal).
+        Soporta imágenes (multimodal) y contexto dinámico de usuarios activos.
         """
         # Registrar uso antes de llamar (optimista)
         self._get_usage(self.current_key_index).register_request()
@@ -199,20 +199,19 @@ class GeminiBrain:
         minutes = (age_delta.seconds % 3600) // 60
         bot_age_str = f"{days} días, {hours} horas y {minutes} minutos"
 
-        # Extraer IDs de usuarios del historial para cargar sus perfiles
-        # Formato esperado en historial: "Nombre (ID: 12345): mensaje"
-        import re
-        unique_user_ids = set()
-        unique_user_ids.add(str(user_id)) # Añadir usuario actual
+        # CONTEXTO DINÁMICO: Cargar perfiles solo de usuarios activos o mencionados
+        # active_user_ids debe venir del cliente (usuarios que hablaron en los últimos 20 min)
+        # También incluimos al usuario actual y a cualquiera mencionado en el historial reciente (opcional, pero mejor ceñirse a activos)
         
-        for msg in context_messages:
-            match = re.search(r"\(ID: (\d+)\)", msg)
-            if match:
-                unique_user_ids.add(match.group(1))
+        users_to_load = set()
+        if active_user_ids:
+            users_to_load.update(active_user_ids)
+        
+        users_to_load.add(str(user_id)) # Siempre incluir al que habla ahora
         
         # Construir sección de perfiles
         profiles_text = ""
-        for uid in unique_user_ids:
+        for uid in users_to_load:
             summary = memory.get_memory_summary(uid)
             if summary.strip():
                 profiles_text += f"--- PERFIL DE USUARIO ID {uid} ---\n{summary}\n"
@@ -348,7 +347,7 @@ Solo el texto del mensaje.
         result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         return result if result else f"feliz {holiday_name} supongo..."
 
-    async def generate_summary(self, current_summary, recent_interactions):
+    async def generate_summary(self, current_summary, recent_interactions, user_id):
         """
         Genera un resumen detallado y actualizado del usuario basado en su historial reciente.
         """
@@ -357,21 +356,29 @@ Solo el texto del mensaje.
 
         prompt = f"""
 TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil psicológico y factual de un usuario.
-NOTA: El desarrollador/creador de la IA es el usuario con ID: 321799812595056645. Su nombre es "Hakka". La IA debe llamarlo "Hakka-sama". Si el usuario actual es él, refléjalo en el resumen.
+NOTA: El desarrollador/creador de la IA es el usuario con ID: 321799812595056645. Su nombre es "Hakka". La IA debe llamarlo "Hakka-sama".
+
+DATOS DEL USUARIO:
+ID de Discord: {user_id}
 
 RESUMEN ACTUAL (Lo que sabíamos hasta ahora):
 {current_summary if current_summary else "No hay información previa."}
 
-NUEVAS INTERACCIONES (Últimos 20 mensajes):
+NUEVAS INTERACCIONES (Últimas 3 horas):
 {chr(10).join(recent_interactions)}
 
 INSTRUCCIONES:
 1. Analiza las nuevas interacciones y combínalas con el resumen actual.
-2. Genera un NUEVO RESUMEN DETALLADO Y EXTENSO.
-3. No pierdas datos importantes anteriores (nombres, fechas, gustos, hechos clave).
+2. Genera un NUEVO RESUMEN DETALLADO Y EXTENSO (El más largo posible, sin perder detalle).
+3. DEBE INCLUIR EXPLÍCITAMENTE:
+   - Discord User ID: {user_id}
+   - Nombre(s) y Apodos.
+   - Edad y Género (si se mencionan o infieren).
+   - Personalidad del usuario.
+   - Gustos y Disgustos detallados.
+   - OPINIÓN DE HAKKURIN SOBRE EL USUARIO (¿Le cae bien? ¿Es molesto? ¿Es su padre?).
+   - Temas de conversación importantes.
 4. Si hay información contradictoria, prioriza la más reciente pero anota la contradicción.
-5. El tono del resumen debe ser técnico y analítico, enfocado en hechos y psicología del usuario.
-6. Extrae: Nombre, Edad, Gustos, Disgustos, Estilo de habla, Relación con la IA, Datos curiosos.
 
 SALIDA:
 Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. Texto plano estructurado.
