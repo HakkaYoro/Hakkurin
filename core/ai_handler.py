@@ -177,12 +177,29 @@ class GeminiBrain:
                         return None # No hay keys vivas
 
                 try:
+                    # Preparar configuración específica para este intento
+                    current_config = config_gen
+                    
+                    # Gemma no soporta JSON mode nativo, así que lo desactivamos si estamos usándolo
+                    if "gemma" in model_name and is_json:
+                        # Crear una copia de la configuración sin response_mime_type
+                        # Nota: types.GenerateContentConfig es un objeto, no un dict.
+                        # La forma más segura es crear uno nuevo con los mismos parámetros excepto mime_type
+                        current_config = types.GenerateContentConfig(
+                            temperature=config_gen.temperature,
+                            top_p=config_gen.top_p,
+                            top_k=config_gen.top_k,
+                            max_output_tokens=config_gen.max_output_tokens,
+                            stop_sequences=config_gen.stop_sequences,
+                            # Omitimos response_mime_type
+                        )
+
                     # Ejecutar la llamada bloqueante en un thread separado
                     response = await asyncio.to_thread(
                         self.client.models.generate_content,
                         model=model_name,
                         contents=prompt,
-                        config=config_gen
+                        config=current_config
                     )
                     
                     text_response = response.text.strip()
