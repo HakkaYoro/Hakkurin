@@ -1,4 +1,5 @@
 import random
+import json
 from google import genai
 from google.genai import types
 from core.config_manager import config
@@ -34,80 +35,86 @@ class GeminiBrain:
         print(f"Rotando API Key de {original_index} a {self.current_key_index}")
         self._initialize_client()
 
-    async def generate_response(self, user_message, user_memory, context_messages=[]):
+    async def analyze_interaction(self, user_message, user_memory, context_messages=[], is_session_active=False):
         """
-        Genera una respuesta usando Gemini 2.5 Flash.
-        
-        Args:
-            user_message (str): El mensaje actual del usuario.
-            user_memory (str): Resumen de la memoria del usuario.
-            context_messages (list): Lista de mensajes previos para contexto (opcional).
+        Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
         """
         if not self.client:
             self._initialize_client()
             if not self.client:
-                return "Error: No hay cerebro disponible (Faltan API Keys)."
+                return {"intent": "error", "response_content": "No brain available."}
 
         system_prompt = config.get("system_prompt")
         bot_name = config.get("bot_name")
         
-        # Construcción del prompt con memoria
+        # Prompt diseñado para "Over-engineering" de la decisión
         full_prompt = f"""
 {system_prompt}
 
-INFORMACIÓN DEL USUARIO (MEMORIA):
-{user_memory}
-
-INSTRUCCIONES ADICIONALES:
-- Responde de manera natural, corta y directa, como en un chat de Discord.
-- No uses hashtags ni formato markdown excesivo a menos que sea parte de tu personalidad.
-- Si el usuario es grosero, puedes ser cortante o burlarte, pero mantén el personaje.
-- Tu nombre es {bot_name}.
+ESTADO ACTUAL:
+- Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
+- Memoria del Usuario: {user_memory}
 
 HISTORIAL RECIENTE:
+{chr(10).join(context_messages)}
+Usuario: "{user_message}"
+
+TU TAREA:
+Analiza el mensaje del usuario y decide tu reacción. Responde EXCLUSIVAMENTE con un objeto JSON válido con este formato:
+{{
+  "is_talking_to_me": boolean, // True si el mensaje va dirigido a ti o es relevante para la conversación actual. False si hablan de otra cosa.
+  "intent": "reply" | "ignore" | "complain" | "new_topic", // "reply": responder normal. "ignore": no hacer nada. "complain": quejarse porque te ignoran o te molestan. "new_topic": cambiar de tema.
+  "thought_process": "string", // Tu razonamiento interno de por qué actúas así. Sé detallada.
+  "response_content": "string" // El texto de tu respuesta (si intent es ignore, esto puede estar vacío).
+}}
+
+REGLAS DE COMPORTAMIENTO:
+1. Si 'Sesión Activa' es SÍ, asume que te hablan a ti a menos que sea muy obvio que no.
+2. Si te ignoran en una sesión activa, puedes elegir "complain" para llamar la atención o "ignore" para dejar morir la charla.
+3. Si 'Sesión Activa' es NO, solo responde si te mencionan, te interesa mucho el tema o quieres molestar (probabilidad baja).
+4. Sé fiel a tu personalidad e-girl/otaku/sarcástica.
 """
-        # Añadir contexto de mensajes anteriores si existen
-        for msg in context_messages:
-            full_prompt += f"{msg}\n"
-            
-        full_prompt += f"Usuario: {user_message}\n{bot_name}:"
 
         try:
-            # Intentar generar contenido
             response = self.client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.8, # Creatividad alta para personalidad
+                    temperature=0.85,
                     top_p=0.95,
                     top_k=40,
-                    max_output_tokens=200, # Respuestas de chat no muy largas
+                    response_mime_type="application/json" # Forzar salida JSON
                 )
             )
-            return response.text.strip()
+            
+            # Limpiar y parsear JSON por si acaso
+            text_response = response.text.strip()
+            # A veces el modelo pone bloques de código markdown ```json ... ```
+            if text_response.startswith("```"):
+                text_response = text_response.strip("`").replace("json\n", "").strip()
+            
+            return json.loads(text_response)
 
         except Exception as e:
-            print(f"Error generando respuesta: {e}")
-            # Si es error de cuota (429) o autenticación, rotar key y reintentar una vez
+            print(f"Error generando respuesta JSON: {e}")
             if "429" in str(e) or "403" in str(e) or "quota" in str(e).lower():
                 print("Posible error de cuota/auth, rotando key...")
                 self._rotate_key()
-                # Reintento simple recursivo (cuidado con loops infinitos, aquí solo 1 nivel por lógica de llamada)
-                # Para evitar recursión infinita real, podríamos pasar un flag, pero por ahora confiamos en la rotación.
-                # Mejor simplemente devolvemos un error genérico si falla tras rotar en la siguiente llamada externa,
-                # o intentamos una vez más aquí:
                 try:
-                    # Re-inicialización ya hecha en _rotate_key
                     if self.client:
                          response = self.client.models.generate_content(
                             model="gemini-2.5-flash",
-                            contents=full_prompt
+                            contents=full_prompt,
+                             config=types.GenerateContentConfig(response_mime_type="application/json")
                         )
-                         return response.text.strip()
+                         text_response = response.text.strip()
+                         if text_response.startswith("```"):
+                            text_response = text_response.strip("`").replace("json\n", "").strip()
+                         return json.loads(text_response)
                 except Exception as e2:
-                    return f"Error crítico de IA: {e2}"
+                    return {"intent": "error", "response_content": f"Error crítico de IA: {e2}"}
             
-            return "..." # Fallback silencioso o error
+            return {"intent": "ignore", "response_content": "", "thought_process": f"Error: {e}"}
 
 # Instancia global
 brain = GeminiBrain()
