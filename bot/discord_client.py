@@ -170,6 +170,9 @@ class HakkurinBot(discord.Client):
         reply_to_id = analysis.get("reply_to_message_id")
         ping_users = analysis.get("ping_users", [])
 
+        # Verificar si el bot está "enganchado" en la conversación del canal
+        is_channel_engaged = conversation_manager.get_channel_context(message.channel.id).is_bot_engaged()
+
         # Normalizar a lista si por alguna razón llega string
         if isinstance(response_content, str):
             # Intentar corregir si es un string que parece una lista "['a', 'b']"
