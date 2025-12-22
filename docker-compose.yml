@@ -1,7 +1,6 @@
 services:
   hakkurin:
     image: ghcr.io/hakkayoro/hakkurin:latest
-    container_name: hakkurin_bot
     restart: unless-stopped
     ports:
       - "30421:8000"
