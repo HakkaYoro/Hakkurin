@@ -137,8 +137,15 @@ class ConversationManager:
                 try:
                     analysis = await brain.analyze_interaction(fake_msg, mem_summary, channel_history, is_session_active=True)
                     
-                    if analysis.get("intent") in ["complain", "reply", "new_topic"] and analysis.get("response_content"):
-                        await bot_send_message_callback(session.channel_id, analysis["response_content"])
+                    response_content = analysis.get("response_content", [])
+                    # Normalizar a lista si es string
+                    if isinstance(response_content, str):
+                         response_content = [response_content]
+                    
+                    if analysis.get("intent") in ["complain", "reply", "new_topic"] and response_content:
+                        for msg_text in response_content:
+                            if isinstance(msg_text, str):
+                                await bot_send_message_callback(session.channel_id, msg_text)
                 except Exception as e:
                     print(f"Error en timeout check: {e}")
 
