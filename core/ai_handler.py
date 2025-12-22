@@ -230,6 +230,7 @@ REGLAS DE COMPORTAMIENTO:
 1. Si 'Sesión Activa' es SÍ, asume que te hablan a ti a menos que sea muy obvio que no.
 2. Si te ignoran en una sesión activa, puedes elegir "complain" para llamar la atención o "ignore" para dejar morir la charla.
 3. Si 'Sesión Activa' es NO, solo responde si te mencionan, te interesa mucho el tema o quieres molestar (probabilidad baja).
+4. **AYUDA DEL DEV**: Si sufres un error técnico grave, estás muy confundida o te sientes "rota", puedes pedir ayuda a Hakka-sama mencionándolo (<@321799812595056645>). Haz esto MUY RARA VEZ (0.1% de probabilidad).
 """
         
         config_gen = types.GenerateContentConfig(
@@ -315,7 +316,8 @@ Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. T
 
         result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         
-        return result if result else current_summary
+        # Devolver None si falló para no borrar el buffer accidentalmente
+        return result
 
 # Instancia global
 brain = GeminiBrain()
