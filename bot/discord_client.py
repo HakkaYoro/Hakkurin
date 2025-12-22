@@ -22,6 +22,8 @@ class HakkurinBot(discord.Client):
         self.check_timeouts_task.start()
         # Iniciar tarea de festividades
         self.check_holidays_task.start()
+        # Iniciar tarea de memoria temporal
+        self.process_memory_queue_task.start()
 
     async def on_ready(self):
         print(f'Conectado como {self.user} (ID: {self.user.id})')
@@ -344,12 +346,9 @@ class HakkurinBot(discord.Client):
             else:
                 interaction_text = f"Usuario: {content}"
 
-            # Añadir interacción al buffer
-            should_summarize = await asyncio.to_thread(memory.add_interaction, user_id, interaction_text)
-            
-            if should_summarize:
-                print(f"Iniciando resumen de memoria para {user_id}...")
-                asyncio.create_task(self.perform_memory_summarization(user_id))
+            # Añadir interacción a la COLA TEMPORAL (espera 30 min)
+            memory.add_to_queue(user_id, interaction_text)
+            print(f"Interacción de {user_id} encolada en memoria temporal.")
                 
         except Exception as e:
             print(f"Error guardando interacción: {e}")
@@ -380,6 +379,20 @@ class HakkurinBot(discord.Client):
         
         print("Cerrando conexión con Discord...")
         await self.close()
+
+    @tasks.loop(seconds=60)
+    async def process_memory_queue_task(self):
+        """Procesa la cola de memoria temporal cada minuto."""
+        try:
+            # Mover items viejos (>30min) a permanente
+            users_to_summarize = await asyncio.to_thread(memory.process_queue)
+            
+            if users_to_summarize:
+                print(f"Procesando resumen diferido para {len(users_to_summarize)} usuarios...")
+                for uid in users_to_summarize:
+                    asyncio.create_task(self.perform_memory_summarization(uid))
+        except Exception as e:
+            print(f"Error en process_memory_queue_task: {e}")
 
     @tasks.loop(seconds=60)
     async def check_holidays_task(self):

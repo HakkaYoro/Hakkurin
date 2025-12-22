@@ -181,5 +181,66 @@ class MemoryManager:
                 })
         return users_data
 
+    # --- MEMORIA TEMPORAL (QUEUE) ---
+    QUEUE_FILE = "data/memory/queue.json"
+
+    def _load_queue(self):
+        if os.path.exists(self.QUEUE_FILE):
+            try:
+                with open(self.QUEUE_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except:
+                return []
+        return []
+
+    def _save_queue(self, queue_data):
+        # Asegurar directorio
+        os.makedirs(os.path.dirname(self.QUEUE_FILE), exist_ok=True)
+        with open(self.QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue_data, f, ensure_ascii=False, indent=2)
+
+    def add_to_queue(self, user_id, text):
+        """Añade una interacción a la cola temporal."""
+        import time
+        queue = self._load_queue()
+        queue.append({
+            "user_id": str(user_id),
+            "text": text,
+            "timestamp": time.time()
+        })
+        self._save_queue(queue)
+
+    def process_queue(self):
+        """
+        Mueve items de la cola temporal a la permanente si tienen > 30 min.
+        Retorna lista de user_ids que necesitan resumen.
+        """
+        import time
+        queue = self._load_queue()
+        if not queue: return []
+
+        now = time.time()
+        new_queue = []
+        users_to_summarize = set()
+        
+        # 30 minutos = 1800 segundos
+        DELAY_SECONDS = 1800 
+
+        for item in queue:
+            if now - item["timestamp"] > DELAY_SECONDS:
+                # Mover a memoria permanente
+                user_id = item["user_id"]
+                should_sum = self.add_interaction(user_id, item["text"])
+                if should_sum:
+                    users_to_summarize.add(user_id)
+            else:
+                # Mantener en cola
+                new_queue.append(item)
+        
+        if len(new_queue) != len(queue):
+            self._save_queue(new_queue)
+            
+        return list(users_to_summarize)
+
 # Instancia global
 memory = MemoryManager()
