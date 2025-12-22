@@ -122,7 +122,7 @@ class GeminiBrain:
     def _update_gemma_usage(self, tokens):
         self.gemma_tokens_this_minute += tokens
 
-    async def _generate_with_retry(self, prompt, config_gen, is_json=False):
+    async def _generate_with_retry(self, prompt, config_gen, is_json=False, force_model=None):
         """
         Intenta generar contenido manejando rotación de keys y cambio de modelo.
         """
@@ -135,7 +135,10 @@ class GeminiBrain:
         now = time.time()
         use_fallback = False
         
-        if now < self.fallback_until:
+        if force_model:
+            print(f"⚠️ Forzando uso de modelo: {force_model}")
+            models_to_try = [force_model]
+        elif now < self.fallback_until:
             print(f"Modo Fallback activo (restan {int(self.fallback_until - now)}s). Usando modelos ligeros.")
             # En modo fallback, probamos SOLO los fallback primero, y si fallan, quizás los primarios (por si acaso)
             # Pero el usuario pidió "revisar cada 40 min", lo que implica quedarse en fallback.
@@ -429,7 +432,7 @@ Solo el texto del mensaje.
         result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         return result if result else f"feliz {holiday_name} supongo..."
 
-    async def generate_summary(self, current_summary, recent_interactions, user_id):
+    async def generate_summary(self, current_summary, recent_interactions, user_id, model_name=None):
         """
         Genera un resumen detallado y actualizado del usuario basado en su historial reciente.
         """
@@ -470,7 +473,7 @@ Solo el texto del resumen.
             top_k=40
         )
 
-        result = await self._generate_with_retry(prompt, config_gen, is_json=False)
+        result = await self._generate_with_retry(prompt, config_gen, is_json=False, force_model=model_name)
         
         # Devolver None si falló para no borrar el buffer accidentalmente
         return result

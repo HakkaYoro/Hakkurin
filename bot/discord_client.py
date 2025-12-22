@@ -419,12 +419,12 @@ class HakkurinBot(discord.Client):
                 print("API sigue fallando. Durmiendo 2 horas más (silenciosamente).")
                 self.sleep_until = time.time() + 7200
 
-    async def perform_memory_summarization(self, user_id):
+    async def perform_memory_summarization(self, user_id, model_name=None):
         try:
             current_summary, buffer = memory.get_buffer_and_summary(user_id)
             if not buffer: return
 
-            new_summary = await brain.generate_summary(current_summary, buffer, user_id)
+            new_summary = await brain.generate_summary(current_summary, buffer, user_id, model_name=model_name)
             
             if new_summary:
                 memory.update_summary(user_id, new_summary)
@@ -438,8 +438,9 @@ class HakkurinBot(discord.Client):
         pending_users = memory.get_users_with_pending_buffer()
         
         if pending_users:
-            print(f"Resumiendo memorias para {len(pending_users)} usuarios...")
-            tasks = [self.perform_memory_summarization(uid) for uid in pending_users]
+            print(f"Resumiendo memorias para {len(pending_users)} usuarios (Forzando Gemma)...")
+            # Usar Gemma-3-27b-it para el resumen final de alta calidad
+            tasks = [self.perform_memory_summarization(uid, model_name="gemma-3-27b-it") for uid in pending_users]
             await asyncio.gather(*tasks)
             print("Todos los resúmenes completados.")
         

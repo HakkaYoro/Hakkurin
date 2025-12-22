@@ -237,5 +237,26 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         self.assertIn(user_id, stale_users)
         print("✅ check_stale_buffers detecta usuarios inactivos con buffer viejo.")
 
+    def test_forced_model_summarization(self):
+        print("\n--- Test: Resumen Forzado con Modelo Específico ---")
+        from core.ai_handler import brain
+        
+        # Mockear _generate_with_retry en la instancia real de brain
+        original_generate = brain._generate_with_retry
+        brain._generate_with_retry = AsyncMock(return_value="Resumen forzado")
+        
+        async def run_test():
+            await brain.generate_summary("Old", ["New"], "user_force", model_name="gemma-3-27b-it")
+        
+        asyncio.run(run_test())
+        
+        # Verificar que se llamó con force_model="gemma-3-27b-it"
+        call_args = brain._generate_with_retry.call_args
+        self.assertEqual(call_args.kwargs.get('force_model'), "gemma-3-27b-it")
+        print("✅ generate_summary pasó correctamente el modelo forzado.")
+        
+        # Restaurar
+        brain._generate_with_retry = original_generate
+
 if __name__ == '__main__':
     unittest.main()
