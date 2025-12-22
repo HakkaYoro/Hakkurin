@@ -65,8 +65,7 @@ class HakkurinBot(discord.Client):
                 should_process = True
 
         if should_process:
-            async with message.channel.typing():
-                await self.process_smart_response(message, session)
+            await self.process_smart_response(message, session)
 
     async def process_smart_response(self, message, session):
         user_id = str(message.author.id)
@@ -80,7 +79,7 @@ class HakkurinBot(discord.Client):
         analysis = await brain.analyze_interaction(
             user_text, 
             mem_summary, 
-            session.context_messages, 
+            session.get_context_text(), 
             is_session_active=session.is_active
         )
         
@@ -88,28 +87,43 @@ class HakkurinBot(discord.Client):
 
         # Decisión basada en intención
         intent = analysis.get("intent", "ignore")
-        response_text = analysis.get("response_content", "")
+        response_content = analysis.get("response_content", [])
         is_talking_to_me = analysis.get("is_talking_to_me", False)
+
+        # Normalizar a lista si por alguna razón llega string
+        if isinstance(response_content, str):
+            response_content = [response_content]
 
         # Actualizar estado de sesión según si nos hablan
         if not is_talking_to_me and session.is_active:
-            # Si estábamos hablando y de repente hablan de otra cosa, 
-            # la IA puede decidir ignorar o quejarse.
-            # Si decide ignorar, incrementamos contador o cerramos sesión si es mucho.
-            pass # La lógica de timeout se encargará si dejan de hablarle directamente
+            pass 
         
-        if intent in ["reply", "complain", "new_topic"] and response_text:
-            # Delay humano variable según longitud
-            delay = min(len(response_text) * 0.05, 3.0)
-            await asyncio.sleep(delay)
+        if intent in ["reply", "complain", "new_topic"] and response_content:
+            async with message.channel.typing():
+                # Delay inicial de "lectura" y "pensamiento"
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
+            full_response_text = ""
             
-            await message.reply(response_text, mention_author=False)
+            for msg_text in response_content:
+                if not msg_text: continue
+                
+                # Calcular tiempo de escritura: ~0.05s por caracter, mínimo 0.5s, máximo 4s
+                typing_time = min(max(len(msg_text) * 0.08, 0.5), 4.0)
+                
+                async with message.channel.typing():
+                    await asyncio.sleep(typing_time)
+                    await message.channel.send(msg_text)
+                
+                full_response_text += msg_text + " "
+                # Pequeña pausa entre mensajes
+                await asyncio.sleep(random.uniform(0.2, 0.5))
             
-            # Añadir nuestra respuesta al contexto
-            session.add_context(f"{config.get('bot_name')}: {response_text}")
+            # Añadir respuesta completa al contexto
+            session.add_context(f"{config.get('bot_name')}: {full_response_text.strip()}")
             
             # Actualizar memoria (fire and forget)
-            asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, response_text))
+            asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, full_response_text.strip()))
         
         elif intent == "ignore":
             print(f"Ignorando mensaje de {user_name} (Intención: ignore)")
