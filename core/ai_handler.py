@@ -129,7 +129,7 @@ class GeminiBrain:
         import asyncio
         
         PRIMARY_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
-        FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemma-3-27b"]
+        FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemma-3-27b-it"]
         
         # Determinar orden de modelos
         now = time.time()
@@ -151,8 +151,10 @@ class GeminiBrain:
         last_error = None
 
         for model_name in models_to_try:
+            print(f"🤖 Intentando generar con modelo: {model_name}")
+            
             # Lógica específica para Gemma
-            if model_name == "gemma-3-27b":
+            if model_name == "gemma-3-27b-it":
                 # Estimar tokens de entrada (muy aprox: chars / 4)
                 # prompt puede ser string o lista de Parts
                 input_text_len = 0
@@ -197,7 +199,7 @@ class GeminiBrain:
                          pass
 
                     # Actualizar uso de Gemma si aplica
-                    if model_name == "gemma-3-27b":
+                    if model_name == "gemma-3-27b-it":
                         # Estimar salida
                         out_tokens = len(text_response) // 4
                         self._update_gemma_usage(estimated_tokens + out_tokens)

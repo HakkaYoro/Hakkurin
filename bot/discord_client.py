@@ -16,6 +16,12 @@ class HakkurinBot(discord.Client):
         super().__init__(intents=intents)
         self.pending_tasks = {} # (channel_id, user_id) -> Task
         self.typing_users = {} # channel_id -> set(user_ids)
+        
+        # Inicializar estado de sueño
+        self.is_sleeping = False
+        self.sleep_until = 0
+        self.last_active_channel_id = None
+        self._load_status_messages()
 
     async def setup_hook(self):
         # Iniciar tarea de fondo para timeouts
@@ -24,10 +30,21 @@ class HakkurinBot(discord.Client):
         self.check_holidays_task.start()
         # Iniciar tarea de memoria temporal
         self.process_memory_queue_task.start()
+        # Iniciar tarea de recuperación de sueño
+        self.recovery_check_task.start()
 
     async def on_ready(self):
         print(f'Conectado como {self.user} (ID: {self.user.id})')
         print('------')
+
+    def _load_status_messages(self):
+        import json
+        import os
+        try:
+            with open("data/status_messages.json", "r", encoding="utf-8") as f:
+                self.status_messages = json.load(f)
+        except:
+            self.status_messages = {"tired": ["Me voy a dormir."], "recovery": ["Ya volví."]}
 
 
     async def on_typing(self, channel, user, when):
@@ -352,6 +369,51 @@ class HakkurinBot(discord.Client):
                 
         except Exception as e:
             print(f"Error guardando interacción: {e}")
+
+    async def enter_sleep_mode(self, channel):
+        """Activa el modo sueño por 2 horas y envía mensaje de despedida."""
+        import time
+        self.is_sleeping = True
+        # 2 horas = 7200 segundos
+        self.sleep_until = time.time() + 7200
+        
+        # Enviar mensaje de cansancio
+        msg = random.choice(self.status_messages.get("tired", ["Me voy a dormir."]))
+        try:
+            await channel.send(msg)
+        except:
+            pass
+        print(f"Modo Sueño activado hasta {self.sleep_until}")
+
+    @tasks.loop(seconds=60)
+    async def recovery_check_task(self):
+        """Revisa si ya pasó el tiempo de sueño y prueba la API."""
+        import time
+        if not self.is_sleeping: return
+        
+        if time.time() > self.sleep_until:
+            print("Tiempo de sueño cumplido. Probando recuperación de API...")
+            
+            # Probar API
+            is_healthy = await brain.test_api_connection()
+            
+            if is_healthy:
+                print("API recuperada. Despertando...")
+                self.is_sleeping = False
+                self.sleep_until = 0
+                
+                # Enviar mensaje de recuperación si tenemos canal
+                if self.last_active_channel_id:
+                    try:
+                        channel = self.get_channel(self.last_active_channel_id)
+                        if channel:
+                            msg = random.choice(self.status_messages.get("recovery", ["Ya volví."]))
+                            await channel.send(msg)
+                    except Exception as e:
+                        print(f"No se pudo enviar mensaje de recuperación: {e}")
+            else:
+                print("API sigue fallando. Durmiendo 2 horas más (silenciosamente).")
+                self.sleep_until = time.time() + 7200
 
     async def perform_memory_summarization(self, user_id):
         try:
