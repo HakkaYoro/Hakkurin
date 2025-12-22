@@ -191,7 +191,7 @@ class GeminiBrain:
                             top_k=config_gen.top_k,
                             max_output_tokens=config_gen.max_output_tokens,
                             stop_sequences=config_gen.stop_sequences,
-                            # Omitimos response_mime_type
+                            response_mime_type=None # Explicitly disable JSON mode
                         )
 
                     # Ejecutar la llamada bloqueante en un thread separado

@@ -346,6 +346,10 @@ class HakkurinBot(discord.Client):
         elif intent == "ignore":
             print(f"Ignorando mensaje de {user_name} (Intención: ignore)")
             pass
+            
+        elif intent == "error":
+            print(f"Error crítico detectado en análisis de IA. Activando modo sueño de emergencia.")
+            await self.enter_sleep_mode(message.channel)
 
     async def save_interaction(self, user_id, user_name, content, is_bot=False):
         """Guarda una interacción en la memoria a largo plazo."""
