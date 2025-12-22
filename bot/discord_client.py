@@ -257,5 +257,5 @@ class HakkurinBot(discord.Client):
         print("Cerrando conexión con Discord...")
         await self.close()
 
-# Instancia global
-bot_client = HakkurinBot()
+# Instancia global eliminada para evitar errores de reinicio
+# bot_client = HakkurinBot()
