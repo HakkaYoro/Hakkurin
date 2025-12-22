@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memorias - Hakkurin</title>
+    <style>
+        :root {
+            --bg-color: #0f0f13;
+            --card-bg: #1a1a23;
+            --text-color: #e0e0e0;
+            --accent-color: #ff79c6;
+            --secondary-accent: #bd93f9;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        h1 {
+            color: var(--accent-color);
+            text-align: center;
+        }
+
+        .memory-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .memory-item {
+            background-color: var(--card-bg);
+            margin-bottom: 10px;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #333;
+            transition: transform 0.2s;
+        }
+
+        .memory-item:hover {
+            transform: translateX(5px);
+            border-color: var(--secondary-accent);
+        }
+
+        .user-id {
+            font-weight: bold;
+            color: var(--secondary-accent);
+        }
+
+        .date {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            width: 100%;
+        }
+
+        .back-btn {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-btn">← Volver al Dashboard</a>
+        <h1>Memorias de Usuarios 🧠</h1>
+
+        {% if not memories %}
+        <p style="text-align: center; color: #888;">No hay memorias guardadas aún.</p>
+        {% else %}
+        <ul class="memory-list">
+            {% for mem in memories %}
+            <li>
+                <a href="/memories/{{ mem.user_id }}">
+                    <div class="memory-item">
+                        <span class="user-id">ID: {{ mem.user_id }}</span>
+                        <span class="date">Actualizado: {{ mem.date }}</span>
+                    </div>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</body>
+
+</html>

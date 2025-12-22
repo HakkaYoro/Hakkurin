@@ -54,5 +54,40 @@ async def update_config(
     
     return RedirectResponse(url="/?saved=true", status_code=303)
 
+    return RedirectResponse(url="/?saved=true", status_code=303)
+
+@app.get("/memories", response_class=HTMLResponse)
+async def list_memories(request: Request):
+    summary_dir = "data/memory/summaries"
+    memories = []
+    if os.path.exists(summary_dir):
+        for filename in os.listdir(summary_dir):
+            if filename.endswith(".txt"):
+                user_id = filename.replace(".txt", "")
+                # Intentar obtener fecha de modificación
+                mod_time = os.path.getmtime(os.path.join(summary_dir, filename))
+                from datetime import datetime
+                date_str = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
+                memories.append({"user_id": user_id, "date": date_str})
+    
+    return templates.TemplateResponse("memories.html", {
+        "request": request,
+        "memories": memories
+    })
+
+@app.get("/memories/{user_id}", response_class=HTMLResponse)
+async def view_memory(request: Request, user_id: str):
+    file_path = f"data/memory/summaries/{user_id}.txt"
+    content = "No se encontró memoria para este usuario."
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            
+    return templates.TemplateResponse("memory_view.html", {
+        "request": request,
+        "user_id": user_id,
+        "content": content
+    })
+
 def run_web_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
