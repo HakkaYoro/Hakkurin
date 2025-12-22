@@ -94,24 +94,81 @@ class GeminiBrain:
         self.current_key_index = (self.current_key_index + 1) % len(self.keys)
         self._initialize_client()
 
+    def _generate_with_retry(self, prompt, config_gen, is_json=False):
+        """
+        Intenta generar contenido manejando rotación de keys y cambio de modelo.
+        """
+        # Modelos disponibles (gemini-3-flash-preview y gemini-2.5-flash)
+        available_models = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+        
+        # Intentar primero con un modelo aleatorio para balancear
+        primary_model = random.choice(available_models)
+        models_to_try = [primary_model] + [m for m in available_models if m != primary_model]
+        
+        last_error = None
+
+        for model_name in models_to_try:
+            # Intentar con el modelo actual (y rotar keys si es necesario)
+            # Haremos hasta 2 intentos por modelo (uno con la key actual, otro tras rotar si hay error de cuota)
+            for attempt in range(2):
+                if not self.client:
+                    self._initialize_client()
+                    if not self.client:
+                        return None # No hay keys vivas
+
+                try:
+                    # print(f"Intentando con {model_name} (Intento {attempt+1})...")
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=config_gen
+                    )
+                    
+                    text_response = response.text.strip()
+                    if is_json:
+                        if text_response.startswith("```"):
+                            text_response = text_response.strip("`").replace("json\n", "").strip()
+                        return json.loads(text_response)
+                    else:
+                        return text_response
+
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+                    is_quota = "429" in error_str or "quota" in error_str or "resource_exhausted" in error_str
+                    is_not_found = "404" in error_str or "not found" in error_str
+
+                    print(f"Error con {model_name}: {e}")
+
+                    if is_quota:
+                        print("Error de cuota detectado. Rotando key...")
+                        self._rotate_key()
+                        # El loop 'attempt' volverá a probar con la nueva key y el MISMO modelo
+                        continue
+                    elif is_not_found:
+                        print("Modelo no encontrado o no soportado. Cambiando de modelo...")
+                        break # Salir del loop de intentos de ESTE modelo y pasar al siguiente en models_to_try
+                    else:
+                        # Error genérico (500, etc), quizás probar otro modelo ayude
+                        break 
+        
+        # Si llegamos aquí, fallaron todos los modelos/intentos
+        print(f"Fallaron todos los intentos. Último error: {last_error}")
+        if is_json:
+            return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
+        return None
+
     async def analyze_interaction(self, user_message, user_memory, context_messages=[], is_session_active=False):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
         """
-        if not self.client:
-            self._initialize_client()
-            if not self.client:
-                return {"intent": "error", "response_content": ["No brain available (All keys exhausted)."]}
-
         # Registrar uso antes de llamar (optimista)
         self._get_usage(self.current_key_index).register_request()
-
 
         system_prompt = config.get("system_prompt")
         bot_name = config.get("bot_name")
         developer_id = config.get("developer_id", "321799812595056645")
         
-        # Prompt diseñado para "Over-engineering" de la decisión
         full_prompt = f"""
 {system_prompt}
 NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. Trátalo con especial respeto o cariño según tu personalidad.
@@ -146,74 +203,25 @@ REGLAS DE COMPORTAMIENTO:
 2. Si te ignoran en una sesión activa, puedes elegir "complain" para llamar la atención o "ignore" para dejar morir la charla.
 3. Si 'Sesión Activa' es NO, solo responde si te mencionan, te interesa mucho el tema o quieres molestar (probabilidad baja).
 """
+        
+        config_gen = types.GenerateContentConfig(
+            temperature=0.85,
+            top_p=0.95,
+            top_k=40,
+            response_mime_type="application/json"
+        )
 
-        try:
-            # Selección dinámica de modelo
-            # gemini-2.5-flash y gemini-3-flash tienen cuotas separadas, así que balanceamos carga
-            available_models = ["gemini-2.5-flash", "gemini-3-flash"]
-            selected_model = random.choice(available_models)
-            
-            # print(f"Usando modelo: {selected_model}") # Debug
-
-            response = self.client.models.generate_content(
-                model=selected_model,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.85,
-                    top_p=0.95,
-                    top_k=40,
-                    response_mime_type="application/json" # Forzar salida JSON
-                )
-            )
-            
-            # Limpiar y parsear JSON por si acaso
-            text_response = response.text.strip()
-            # A veces el modelo pone bloques de código markdown ```json ... ```
-            if text_response.startswith("```"):
-                text_response = text_response.strip("`").replace("json\n", "").strip()
-            
-            return json.loads(text_response)
-
-        except Exception as e:
-            print(f"Error generando respuesta JSON con {selected_model}: {e}")
-            
-            # Lógica de reintento y fallback
-            is_quota_error = "429" in str(e) or "403" in str(e) or "quota" in str(e).lower()
-            
-            if is_quota_error:
-                print("Posible error de cuota/auth, rotando key y cambiando modelo...")
-                self._rotate_key()
-            else:
-                print("Error genérico, intentando con el otro modelo...")
-
-            # Intentar con el OTRO modelo (si falló 2.5, probar 3, y viceversa)
-            fallback_model = "gemini-3-flash" if selected_model == "gemini-2.5-flash" else "gemini-2.5-flash"
-            
-            try:
-                if self.client:
-                    response = self.client.models.generate_content(
-                        model=fallback_model,
-                        contents=full_prompt,
-                        config=types.GenerateContentConfig(response_mime_type="application/json")
-                    )
-                    text_response = response.text.strip()
-                    if text_response.startswith("```"):
-                        text_response = text_response.strip("`").replace("json\n", "").strip()
-                    return json.loads(text_response)
-            except Exception as e2:
-                return {"intent": "error", "response_content": [f"Error crítico de IA ({fallback_model}): {e2}"]}
-            
-            return {"intent": "ignore", "response_content": [], "thought_process": f"Error: {e}"}
+        result = self._generate_with_retry(full_prompt, config_gen, is_json=True)
+        
+        if result:
+            return result
+        else:
+            return {"intent": "ignore", "response_content": [], "thought_process": "Error de generación"}
 
     async def generate_summary(self, current_summary, recent_interactions):
         """
         Genera un resumen detallado y actualizado del usuario basado en su historial reciente.
         """
-        if not self.client:
-            self._initialize_client()
-            if not self.client:
-                return current_summary # Si no hay IA, devolvemos lo que había
-
         # Registrar uso
         self._get_usage(self.current_key_index).register_request()
 
@@ -237,24 +245,15 @@ INSTRUCCIONES:
 SALIDA:
 Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. Texto plano estructurado.
 """
-        try:
-            # Selección dinámica también para resúmenes
-            available_models = ["gemini-2.5-flash", "gemini-3-flash"]
-            selected_model = random.choice(available_models)
+        config_gen = types.GenerateContentConfig(
+            temperature=0.3,
+            top_p=0.95,
+            top_k=40
+        )
 
-            response = self.client.models.generate_content(
-                model=selected_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3, # Baja temperatura para ser preciso y factual
-                    top_p=0.95,
-                    top_k=40
-                )
-            )
-            return response.text.strip()
-        except Exception as e:
-            print(f"Error generando resumen de memoria: {e}")
-            return current_summary
+        result = self._generate_with_retry(prompt, config_gen, is_json=False)
+        
+        return result if result else current_summary
 
 # Instancia global
 brain = GeminiBrain()
