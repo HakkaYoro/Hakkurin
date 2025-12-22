@@ -86,13 +86,36 @@ class MemoryManager:
         mem["interaction_count"] += 1
         
         now = time.time()
-        # Resumir SOLO si hay 20 o más mensajes en el buffer (Batch processing)
-        # Esto ahorra API calls como solicitó el usuario.
-        should_summarize = len(mem["history_buffer"]) >= 20
+        # Resumir si hay 20+ mensajes O si han pasado 30 minutos desde el último resumen
+        # 30 minutos = 1800 segundos
+        time_since_last = now - mem.get("last_summary_time", 0)
+        should_summarize = len(mem["history_buffer"]) >= 20 or (len(mem["history_buffer"]) > 0 and time_since_last > 1800)
         
         self.save_memory(user_id, mem)
         
         return should_summarize
+
+    def check_stale_buffers(self):
+        """Revisa todos los usuarios y devuelve los que tienen mensajes pendientes por > 30 min."""
+        import time
+        users = []
+        if not os.path.exists(MEMORY_DIR):
+            return users
+            
+        now = time.time()
+        DELAY_30M = 1800
+        
+        for filename in os.listdir(MEMORY_DIR):
+            if filename.endswith(".enc"):
+                user_id = filename.replace(".enc", "")
+                mem = self.get_memory(user_id)
+                
+                buffer = mem.get("history_buffer", [])
+                last_sum = mem.get("last_summary_time", 0)
+                
+                if buffer and (now - last_sum > DELAY_30M):
+                    users.append(user_id)
+        return users
 
     def get_buffer_and_summary(self, user_id):
         mem = self.get_memory(user_id)

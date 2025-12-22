@@ -87,6 +87,11 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         print("\n--- Test: Trigger de Resumen por Lotes (20 msgs) ---")
         user_id = "test_user_batch"
         
+        # Inicializar memoria con tiempo reciente para evitar trigger por tiempo
+        mem = self.memory.get_memory(user_id)
+        mem["last_summary_time"] = time.time()
+        self.memory.save_memory(user_id, mem)
+        
         # Añadir 19 mensajes
         for i in range(19):
             should = self.memory.add_interaction(user_id, f"Msg {i}")
@@ -195,6 +200,42 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(bot.is_sleeping)
             mock_channel.send.assert_called_with("Back")
             print("✅ Recuperación exitosa tras test de API positivo.")
+
+    def test_time_based_summarization(self):
+        print("\n--- Test: Resumen por Tiempo (>30m) ---")
+        user_id = "test_user_time"
+        
+        # 1. Añadir interacción (menos de 20)
+        self.memory.add_interaction(user_id, "Hola")
+        mem = self.memory.get_memory(user_id)
+        mem["last_summary_time"] = time.time() # Recién resumido
+        self.memory.save_memory(user_id, mem)
+        
+        # 2. Verificar que NO pide resumen inmediato
+        should = self.memory.add_interaction(user_id, "Otro mensaje")
+        self.assertFalse(should, "No debería resumir con pocos mensajes y poco tiempo.")
+        
+        # 3. Simular paso del tiempo (35 min)
+        mem = self.memory.get_memory(user_id)
+        mem["last_summary_time"] = time.time() - 2100 # > 30m (1800s)
+        self.memory.save_memory(user_id, mem)
+        
+        # 4. Verificar trigger por tiempo al añadir interacción
+        should = self.memory.add_interaction(user_id, "Trigger msg")
+        self.assertTrue(should, "Debería resumir por tiempo (>30m).")
+        print("✅ Trigger por tiempo al añadir interacción funciona.")
+        
+        # 5. Verificar check_stale_buffers (sin interacción nueva)
+        # Resetear
+        mem = self.memory.get_memory(user_id)
+        mem["last_summary_time"] = time.time() - 2100
+        # Asegurar que hay buffer
+        mem["history_buffer"] = ["Mensaje pendiente"]
+        self.memory.save_memory(user_id, mem)
+        
+        stale_users = self.memory.check_stale_buffers()
+        self.assertIn(user_id, stale_users)
+        print("✅ check_stale_buffers detecta usuarios inactivos con buffer viejo.")
 
 if __name__ == '__main__':
     unittest.main()
