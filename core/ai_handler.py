@@ -102,7 +102,7 @@ class GeminiBrain:
         self.current_key_index = (self.current_key_index + 1) % len(self.keys)
         self._initialize_client()
 
-    def _generate_with_retry(self, prompt, config_gen, is_json=False):
+    async def _generate_with_retry(self, prompt, config_gen, is_json=False):
         """
         Intenta generar contenido manejando rotación de keys y cambio de modelo.
         """
@@ -115,6 +115,8 @@ class GeminiBrain:
         
         last_error = None
 
+        import asyncio
+
         for model_name in models_to_try:
             # Intentar con el modelo actual (y rotar keys si es necesario)
             # Haremos hasta 2 intentos por modelo (uno con la key actual, otro tras rotar si hay error de cuota)
@@ -125,8 +127,10 @@ class GeminiBrain:
                         return None # No hay keys vivas
 
                 try:
-                    # print(f"Intentando con {model_name} (Intento {attempt+1})...")
-                    response = self.client.models.generate_content(
+                    # Ejecutar la llamada bloqueante en un thread separado para no bloquear el loop
+                    # Esto permite que la tarea sea cancelable desde fuera (discord_client)
+                    response = await asyncio.to_thread(
+                        self.client.models.generate_content,
                         model=model_name,
                         contents=prompt,
                         config=config_gen
@@ -228,7 +232,7 @@ REGLAS DE COMPORTAMIENTO:
             response_mime_type="application/json"
         )
 
-        result = self._generate_with_retry(full_prompt, config_gen, is_json=True)
+        result = await self._generate_with_retry(full_prompt, config_gen, is_json=True)
         
         if result:
             return result
@@ -269,7 +273,7 @@ Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. T
             top_k=40
         )
 
-        result = self._generate_with_retry(prompt, config_gen, is_json=False)
+        result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         
         return result if result else current_summary
 

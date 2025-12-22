@@ -34,6 +34,18 @@ class HakkurinBot(discord.Client):
         
         self.typing_users[channel.id].add(user.id)
         
+        # CANCELACIÓN POR TYPING (Solicitado por usuario)
+        # Si alguien empieza a escribir, cancelamos cualquier generación en curso para esperar el nuevo mensaje.
+        keys_to_remove = []
+        for (t_channel_id, t_user_id), task in self.pending_tasks.items():
+            if t_channel_id == channel.id:
+                task.cancel()
+                keys_to_remove.append((t_channel_id, t_user_id))
+                print(f"Cancelada tarea en {channel.id} por typing de {user.name}")
+        
+        for k in keys_to_remove:
+            del self.pending_tasks[k]
+        
         # Limpiar usuario del set después de 10 segundos (timeout de typing de Discord)
         await asyncio.sleep(10)
         if channel.id in self.typing_users and user.id in self.typing_users[channel.id]:
