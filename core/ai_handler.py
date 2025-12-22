@@ -56,6 +56,14 @@ class GeminiBrain:
             self.key_usage[index] = KeyUsage()
         return self.key_usage[index]
 
+    def reload_config(self):
+        """Recarga la configuración y reinicia el cliente."""
+        print("Recargando configuración de GeminiBrain...")
+        self.keys = config.get("gemini_keys", [])
+        self.current_key_index = 0
+        self.client = None
+        self._initialize_client()
+
     def _initialize_client(self):
         if not self.keys:
             print("ADVERTENCIA: No hay API Keys de Gemini configuradas.")
@@ -171,7 +179,7 @@ class GeminiBrain:
         
         full_prompt = f"""
 {system_prompt}
-NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. Trátalo con especial respeto o cariño según tu personalidad.
+NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. SU NOMBRE ES "Hakka". DEBES LLAMARLO SIEMPRE "Hakka-sama". Trátalo con máximo respeto y cariño.
 IMPORTANTE: En el historial verás mensajes como "Nombre (ID: 12345): mensaje". Si hay varios usuarios con el mismo nombre, usa el ID para diferenciarlos. El ID es único.
 
 ESTADO ACTUAL:
@@ -188,7 +196,9 @@ Analiza el mensaje del usuario y decide tu reacción. Responde EXCLUSIVAMENTE co
   "is_talking_to_me": boolean, // True si el mensaje va dirigido a ti o es relevante para la conversación actual. False si hablan de otra cosa.
   "intent": "reply" | "ignore" | "complain" | "new_topic", // "reply": responder normal. "ignore": no hacer nada. "complain": quejarse porque te ignoran o te molestan. "new_topic": cambiar de tema.
   "thought_process": "string", // Tu razonamiento interno.
-  "response_content": ["string", "string"] // LISTA de strings. Tus respuestas deben ser CORTAS y divididas en varios mensajes si es necesario, simulando un chat real.
+  "response_content": ["string", "string"], // LISTA de strings. Tus respuestas deben ser CORTAS y divididas en varios mensajes si es necesario.
+  "reply_to_message_id": "string" | null, // (OPCIONAL) ID del mensaje al que quieres responder específicamente (Reply de Discord).
+  "ping_users": ["user_id"] // (OPCIONAL) Lista de IDs de usuarios a los que quieres mencionar (Ping).
 }}
 
 REGLAS DE PERSONALIDAD (CRÍTICO):
@@ -198,6 +208,7 @@ REGLAS DE PERSONALIDAD (CRÍTICO):
 4. **DIVIDE MENSAJES**: Si tienes dos ideas, mándalas en dos strings separados en la lista `response_content`.
    Ejemplo: ["mentira", "a ver"] es mejor que ["mentira, a ver"].
 5. **NATURALIDAD**: Si te ignoran, ignora. Si te insultan, responde corto y cortante o ignora.
+6. **GRUPO**: Si hay mucha gente hablando, usa pings (<@user_id>) o replies solo si es necesario para que sepan a quién le hablas.
 
 REGLAS DE COMPORTAMIENTO:
 1. Si 'Sesión Activa' es SÍ, asume que te hablan a ti a menos que sea muy obvio que no.
@@ -228,6 +239,7 @@ REGLAS DE COMPORTAMIENTO:
 
         prompt = f"""
 TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil psicológico y factual de un usuario.
+NOTA: El desarrollador/creador de la IA es el usuario con ID: 321799812595056645. Su nombre es "Hakka". La IA debe llamarlo "Hakka-sama". Si el usuario actual es él, refléjalo en el resumen.
 
 RESUMEN ACTUAL (Lo que sabíamos hasta ahora):
 {current_summary if current_summary else "No hay información previa."}

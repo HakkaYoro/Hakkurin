@@ -74,9 +74,13 @@ if __name__ == "__main__":
     web_thread.start()
     logger.info("WebUI iniciada en http://localhost:8000")
 
+    # Importar brain para recarga
+    from core.ai_handler import brain
+
     while True:
         # Recargar configuración antes de cada inicio
         config.load_config()
+        brain.reload_config() # Recargar keys de IA
         
         should_restart = False
         logger.info("Arrancando proceso del bot...")

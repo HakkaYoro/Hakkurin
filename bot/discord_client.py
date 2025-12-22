@@ -95,25 +95,31 @@ class HakkurinBot(discord.Client):
             # Activar sesión explícitamente
             session.activate()
             
-            # DEBOUNCE LOGIC
-            # Usamos channel_id como key principal para el debounce global del canal si queremos evitar spam,
-            # pero el usuario pidió debounce por usuario ("al hablar con un usuario").
-            # Sin embargo, para multi-usuario fluido, si A habla y B habla, deberíamos procesar ambos.
-            # Mantendremos debounce por usuario para no responder a cada línea de un mismo usuario.
+            # DEBOUNCE LOGIC Y CANCELACIÓN POR INTERRUPCIÓN
+            # Si alguien habla en el canal mientras el bot piensa, cancelamos para que re-evalúe con el nuevo contexto.
+            channel_id = message.channel.id
+            
+            # Cancelar cualquier tarea pendiente en este canal (sea de quien sea)
+            # Esto implementa la "cancelación automática" si siguen escribiendo
+            keys_to_remove = []
+            for (t_channel_id, t_user_id), task in self.pending_tasks.items():
+                if t_channel_id == channel_id:
+                    task.cancel()
+                    keys_to_remove.append((t_channel_id, t_user_id))
+                    print(f"Cancelada tarea pendiente en {channel_id} por nuevo mensaje de {message.author.name}")
+            
+            for k in keys_to_remove:
+                del self.pending_tasks[k]
+            
+            # Crear nueva tarea con delay (Cooldown 3s)
             key = (message.channel.id, message.author.id)
-            
-            # Cancelar tarea pendiente si existe
-            if key in self.pending_tasks:
-                self.pending_tasks[key].cancel()
-            
-            # Crear nueva tarea con delay
             task = asyncio.create_task(self.process_with_debounce(message, session, key))
             self.pending_tasks[key] = task
 
     async def process_with_debounce(self, message, session, key):
         try:
-            # Esperar 4 segundos (reducido de 8)
-            await asyncio.sleep(4)
+            # Esperar 3 segundos (Cooldown solicitado)
+            await asyncio.sleep(3)
             
             # Verificar si alguien está escribiendo en el canal
             channel_id = message.channel.id
@@ -161,6 +167,8 @@ class HakkurinBot(discord.Client):
         intent = analysis.get("intent", "ignore")
         response_content = analysis.get("response_content", [])
         is_talking_to_me = analysis.get("is_talking_to_me", False)
+        reply_to_id = analysis.get("reply_to_message_id")
+        ping_users = analysis.get("ping_users", [])
 
         # Normalizar a lista si por alguna razón llega string
         if isinstance(response_content, str):
@@ -190,15 +198,48 @@ class HakkurinBot(discord.Client):
 
             full_response_text = ""
             
-            for msg_text in response_content:
+            # Preparar referencia de mensaje si la IA lo pidió
+            reference = None
+            if reply_to_id:
+                try:
+                    # Intentar buscar el mensaje, aunque puede ser viejo
+                    # Discord.py permite pasar un MessageReference o un Message object
+                    # Si tenemos el ID, creamos una referencia simple
+                     reference = discord.MessageReference(message_id=int(reply_to_id), channel_id=message.channel.id)
+                except:
+                    pass
+            elif is_talking_to_me and not is_channel_engaged: 
+                 # Si me hablan directo y no es charla grupal fluida, por defecto respondo al mensaje original
+                 # A MENOS que sea charla fluida, donde el reply a veces molesta.
+                 # El usuario pidió "marcar mensajes", así que priorizamos lo que diga la IA.
+                 reference = message 
+
+            # Procesar pings
+            ping_text = ""
+            if ping_users:
+                for uid in ping_users:
+                    ping_text += f"<@{uid}> "
+
+            for i, msg_text in enumerate(response_content):
                 if not msg_text: continue
                 
+                # Añadir pings al primer mensaje
+                if i == 0 and ping_text:
+                    msg_text = ping_text + msg_text
+
                 # Calcular tiempo de escritura: ~0.05s por caracter, mínimo 0.5s, máximo 4s
                 typing_time = min(max(len(msg_text) * 0.08, 0.5), 4.0)
                 
                 async with message.channel.typing():
                     await asyncio.sleep(typing_time)
-                    await message.channel.send(msg_text)
+                    # Usar referencia solo en el primer mensaje si existe
+                    if i == 0 and reference:
+                        try:
+                            await message.channel.send(msg_text, reference=reference)
+                        except:
+                             await message.channel.send(msg_text) # Fallback si el mensaje se borró
+                    else:
+                        await message.channel.send(msg_text)
                 
                 full_response_text += msg_text + " "
                 # Pequeña pausa entre mensajes
