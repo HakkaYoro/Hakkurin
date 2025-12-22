@@ -126,6 +126,10 @@ class HakkurinBot(discord.Client):
             for k in keys_to_remove:
                 del self.pending_tasks[k]
             
+            # Guardar mensaje del usuario en memoria INMEDIATAMENTE
+            # Esto evita pérdida de contexto si la generación se cancela después
+            asyncio.create_task(self.save_interaction(message.author.id, message.author.display_name, message.content, is_bot=False))
+
             # Crear nueva tarea con delay (Cooldown 3s)
             key = (message.channel.id, message.author.id)
             task = asyncio.create_task(self.process_with_debounce(message, session, key))
@@ -317,31 +321,38 @@ class HakkurinBot(discord.Client):
             # Guardar último canal conocido para festividades
             memory.update_last_channel(user_id, message.channel.id)
 
-            # Actualizar memoria (fire and forget)
-            asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, full_response_text.strip()))
+            # Actualizar memoria con la RESPUESTA DEL BOT
+            asyncio.create_task(self.save_interaction(user_id, user_name, full_response_text.strip(), is_bot=True))
         
         elif intent == "ignore":
             print(f"Ignorando mensaje de {user_name} (Intención: ignore)")
             pass
 
-    async def update_user_memory(self, user_id, user_name, user_text, bot_text):
+    async def save_interaction(self, user_id, user_name, content, is_bot=False):
+        """Guarda una interacción en la memoria a largo plazo."""
         try:
-            # Actualizar nombre si no existe
-            current_mem = memory.get_memory(user_id)
-            if not current_mem["profile"]["name"]:
-                current_mem["profile"]["name"] = user_name
-                memory.save_memory(user_id, current_mem)
+            # Actualizar nombre si no existe y es usuario
+            if not is_bot:
+                current_mem = memory.get_memory(user_id)
+                if not current_mem["profile"]["name"]:
+                    current_mem["profile"]["name"] = user_name
+                    memory.save_memory(user_id, current_mem)
+
+            # Formatear texto
+            if is_bot:
+                interaction_text = f"Hakkurin: {content}"
+            else:
+                interaction_text = f"Usuario: {content}"
 
             # Añadir interacción al buffer
-            interaction_text = f"Usuario: {user_text}\nBot: {bot_text}"
-            should_summarize = memory.add_interaction(user_id, interaction_text)
+            should_summarize = await asyncio.to_thread(memory.add_interaction, user_id, interaction_text)
             
             if should_summarize:
-                print(f"Iniciando resumen de memoria para {user_name}...")
+                print(f"Iniciando resumen de memoria para {user_id}...")
                 asyncio.create_task(self.perform_memory_summarization(user_id))
                 
         except Exception as e:
-            print(f"Error actualizando memoria: {e}")
+            print(f"Error guardando interacción: {e}")
 
     async def perform_memory_summarization(self, user_id):
         try:
