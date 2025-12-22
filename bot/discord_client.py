@@ -12,6 +12,7 @@ class HakkurinBot(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
+        self.pending_tasks = {} # (channel_id, user_id) -> Task
 
     async def setup_hook(self):
         # Iniciar tarea de fondo para timeouts
@@ -45,8 +46,14 @@ class HakkurinBot(discord.Client):
         if allowed_channels and message.channel.id not in allowed_channels:
             return
 
-        # 1. Gestión de Sesión
+        # 1. Recuperar sesión (sin crearla aún para chequear estado previo)
+        # Bueno, create_or_update ya no activa, así que es seguro llamar.
         session = conversation_manager.create_or_update_session(message.channel.id, message.author.id)
+        
+        # Estado previo (si estaba activa antes de este mensaje)
+        # Como acabamos de llamar a update, last_interaction se actualizó, pero is_active no cambió.
+        was_active = session.is_active
+        
         session.add_context(f"Usuario: {message.content}")
 
         # 2. Determinar Trigger
@@ -54,18 +61,45 @@ class HakkurinBot(discord.Client):
         is_reply = (message.reference and message.reference.cached_message and 
                     message.reference.cached_message.author == self.user)
         
-        # Si la sesión está activa (reciente), asumimos que nos hablan, 
-        # PERO la IA confirmará con "is_talking_to_me".
-        # Si NO está activa, usamos probabilidad o mención.
-        should_process = is_mentioned or is_reply or session.is_active
+        should_process = is_mentioned or is_reply or was_active
         
         if not should_process:
-            reply_prob = config.get("reply_probability", 0.125)
+            reply_prob = config.get("reply_probability", 0.05) # Default bajado a 0.05
             if random.random() < reply_prob:
                 should_process = True
+                print(f"Trigger por probabilidad ({reply_prob}) para {message.author.display_name}")
 
         if should_process:
+            # Activar sesión explícitamente
+            session.activate()
+            
+            # DEBOUNCE LOGIC
+            key = (message.channel.id, message.author.id)
+            
+            # Cancelar tarea pendiente si existe (el usuario sigue escribiendo)
+            if key in self.pending_tasks:
+                self.pending_tasks[key].cancel()
+                # print(f"Debounce: Cancelada tarea previa para {message.author.display_name}")
+            
+            # Crear nueva tarea con delay
+            task = asyncio.create_task(self.process_with_debounce(message, session, key))
+            self.pending_tasks[key] = task
+
+    async def process_with_debounce(self, message, session, key):
+        try:
+            # Esperar 8 segundos para asegurar que no escribe más
+            await asyncio.sleep(8)
+            
+            # Procesar
             await self.process_smart_response(message, session)
+            
+        except asyncio.CancelledError:
+            # Tarea cancelada por nuevo mensaje, no hacemos nada
+            pass
+        finally:
+            # Limpiar del diccionario si es esta misma tarea
+            if key in self.pending_tasks and self.pending_tasks[key] == asyncio.current_task():
+                del self.pending_tasks[key]
 
     async def process_smart_response(self, message, session):
         user_id = str(message.author.id)

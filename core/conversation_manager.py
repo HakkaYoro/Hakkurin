@@ -11,14 +11,17 @@ class Session:
         self.channel_id = channel_id
         self.user_id = user_id
         self.last_interaction = time.time()
-        self.is_active = True
+        self.is_active = False # Por defecto inactiva hasta que se decida responder
         self.ignored_count = 0
         self.context_messages = [] # Lista de dicts: {'timestamp': float, 'content': str}
 
     def update_interaction(self):
         self.last_interaction = time.time()
-        self.ignored_count = 0
+        # No activamos automáticamente, solo actualizamos tiempo
+        
+    def activate(self):
         self.is_active = True
+        self.last_interaction = time.time()
 
     def add_context(self, message):
         now = time.time()
