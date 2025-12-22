@@ -99,6 +99,20 @@ class MemoryManager:
         mem["history_buffer"] = [] # Limpiar buffer
         self.save_memory(user_id, mem)
 
+    def get_users_with_pending_buffer(self):
+        """Devuelve una lista de user_ids que tienen mensajes en el buffer sin resumir."""
+        users = []
+        if not os.path.exists(MEMORY_DIR):
+            return users
+            
+        for filename in os.listdir(MEMORY_DIR):
+            if filename.endswith(".enc"):
+                user_id = filename.replace(".enc", "")
+                _, buffer = self.get_buffer_and_summary(user_id)
+                if buffer:
+                    users.append(user_id)
+        return users
+
     def get_memory_summary(self, user_id):
         """Devuelve un string resumen para inyectar en el prompt."""
         mem = self.get_memory(user_id)

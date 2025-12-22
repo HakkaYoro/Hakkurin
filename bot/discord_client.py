@@ -230,5 +230,19 @@ class HakkurinBot(discord.Client):
         except Exception as e:
             print(f"Error en proceso de resumen: {e}")
 
+    async def force_shutdown_and_summarize(self):
+        """Fuerza el resumen de todos los usuarios pendientes y cierra el bot."""
+        print("Iniciando apagado controlado con resumen forzado...")
+        pending_users = memory.get_users_with_pending_buffer()
+        
+        if pending_users:
+            print(f"Resumiendo memorias para {len(pending_users)} usuarios...")
+            tasks = [self.perform_memory_summarization(uid) for uid in pending_users]
+            await asyncio.gather(*tasks)
+            print("Todos los resúmenes completados.")
+        
+        print("Cerrando conexión con Discord...")
+        await self.close()
+
 # Instancia global
 bot_client = HakkurinBot()

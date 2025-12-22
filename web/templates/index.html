@@ -151,23 +151,178 @@
                     <textarea id="system_prompt" name="system_prompt" rows="6">{{ config.system_prompt }}</textarea>
                 </div>
 
-                <button type="submit">Guardar Cambios</button>
-            </form>
-        </div>
-    </div>
+                <!DOCTYPE html>
+                <html lang="es">
 
-    <script>
-        // Mostrar mensaje de éxito si viene en la URL
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('saved') === 'true') {
-            document.getElementById('success-msg').style.display = 'block';
-            // Limpiar URL
-            window.history.replaceState({}, document.title, "/");
-            setTimeout(() => {
-                document.getElementById('success-msg').style.display = 'none';
-            }, 3000);
-        }
-    </script>
-</body>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Hakkurin Control Center</title>
+                    <style>
+                        :root {
+                            --bg-color: #0f0f13;
+                            --card-bg: #1a1a23;
+                            --text-color: #e0e0e0;
+                            --accent-color: #ff79c6;
+                            /* Rosa neón */
+                            --secondary-accent: #bd93f9;
+                            /* Púrpura */
+                            --input-bg: #2b2b3b;
+                        }
 
-</html>
+                        body {
+                            background-color: var(--bg-color);
+                            color: var(--text-color);
+                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            margin: 0;
+                            padding: 20px;
+                            display: flex;
+                            justify-content: center;
+                        }
+
+                        .container {
+                            width: 100%;
+                            max-width: 800px;
+                        }
+
+                        h1 {
+                            color: var(--accent-color);
+                            text-align: center;
+                            text-shadow: 0 0 10px var(--accent-color);
+                            margin-bottom: 30px;
+                        }
+
+                        .card {
+                            background-color: var(--card-bg);
+                            border-radius: 15px;
+                            padding: 25px;
+                            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+                            border: 1px solid #333;
+                        }
+
+                        .form-group {
+                            margin-bottom: 20px;
+                        }
+
+                        label {
+                            display: block;
+                            margin-bottom: 8px;
+                            color: var(--secondary-accent);
+                            font-weight: bold;
+                        }
+
+                        input[type="text"],
+                        input[type="number"],
+                        textarea {
+                            width: 100%;
+                            padding: 12px;
+                            background-color: var(--input-bg);
+                            border: 1px solid #444;
+                            border-radius: 8px;
+                            color: white;
+                            box-sizing: border-box;
+                            font-family: inherit;
+                        }
+
+                        input:focus,
+                        textarea:focus {
+                            outline: none;
+                            border-color: var(--accent-color);
+                            box-shadow: 0 0 5px rgba(255, 121, 198, 0.5);
+                        }
+
+                        textarea {
+                            resize: vertical;
+                            min-height: 100px;
+                        }
+
+                        button {
+                            background: linear-gradient(45deg, var(--accent-color), var(--secondary-accent));
+                            color: white;
+                            border: none;
+                            padding: 12px 25px;
+                            border-radius: 25px;
+                            cursor: pointer;
+                            font-size: 16px;
+                            font-weight: bold;
+                            width: 100%;
+                            transition: transform 0.2s, box-shadow 0.2s;
+                        }
+
+                        button:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 5px 15px rgba(189, 147, 249, 0.4);
+                        }
+
+                        .alert {
+                            padding: 15px;
+                            background-color: rgba(80, 250, 123, 0.2);
+                            border: 1px solid #50fa7b;
+                            color: #50fa7b;
+                            border-radius: 8px;
+                            margin-bottom: 20px;
+                            text-align: center;
+                            display: none;
+                        }
+                    </style>
+                </head>
+
+                <body>
+                    <div class="container">
+                        <h1>Hakkurin Dashboard</h1>
+
+                        <div id="success-msg" class="alert">
+                            ¡Configuración guardada exitosamente!
+                        </div>
+
+                        <div class="card">
+                            <form action="/update_config" method="post">
+                                <div class="form-group">
+                                    <label for="bot_name">Nombre del Bot</label>
+                                    <input type="text" id="bot_name" name="bot_name" value="{{ config.bot_name }}">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="bot_token">Discord Bot Token</label>
+                                    <input type="text" id="bot_token" name="bot_token" value="{{ config.bot_token }}">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="gemini_keys">Gemini API Keys (Una por línea)</label>
+                                    <textarea id="gemini_keys" name="gemini_keys" rows="4">{% for key in config.gemini_keys %}{{ key }}
+{% endfor %}</textarea>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="reply_probability">Probabilidad de Respuesta (0.0 - 1.0)</label>
+                                    <input type="number" id="reply_probability" name="reply_probability" step="0.01"
+                                        min="0" max="1" value="{{ config.reply_probability }}">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="system_prompt">System Prompt (Personalidad)</label>
+                                    <textarea id="system_prompt" name="system_prompt"
+                                        rows="6">{{ config.system_prompt }}</textarea>
+                                </div>
+
+                                <div class="form-group">
+
+                                    <script>
+                                        // Mostrar mensaje de éxito si viene en la URL
+                                        const urlParams = new URLSearchParams(window.location.search);
+                                        if (urlParams.get('saved') === 'true') {
+                                            document.getElementById('success-msg').style.display = 'block';
+                                            // Limpiar URL
+                                            window.history.replaceState({}, document.title, "/");
+                                            setTimeout(() => {
+                                                document.getElementById('success-msg').style.display = 'none';
+                                            }, 3000);
+                                        }
+                                        if (urlParams.get('restarted') === 'true') {
+                                            alert("El bot se está reiniciando. Espera unos segundos.");
+                                            window.history.replaceState({}, document.title, "/");
+                                        }
+                                    </script>
+                </body>
+
+                </html>

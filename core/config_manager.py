@@ -24,7 +24,8 @@ class ConfigManager:
                 "bot_name": "Hakkurin",
                 "allowed_channels": [],
                 "system_prompt": "Eres Hakkurin, una chica usuaria de Discord con una personalidad e-girl, otaku y fujoshi. Te gusta el anime, el manga y usar emoticonos. Eres sarcástica pero amigable si te tratan bien. Si te ignoran, dejas de hablar. Tienes memoria de con quién hablas.",
-                "reply_probability": 0.125
+                "reply_probability": 0.125,
+                "developer_id": "321799812595056645"
             }
             self.save_config()
         else:

@@ -109,10 +109,12 @@ class GeminiBrain:
 
         system_prompt = config.get("system_prompt")
         bot_name = config.get("bot_name")
+        developer_id = config.get("developer_id", "321799812595056645")
         
         # Prompt diseñado para "Over-engineering" de la decisión
         full_prompt = f"""
 {system_prompt}
+NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. Trátalo con especial respeto o cariño según tu personalidad.
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).

@@ -18,6 +18,19 @@ async def read_root(request: Request):
         "config": config.config
     })
 
+restart_callback = None
+
+def set_restart_callback(callback):
+    global restart_callback
+    restart_callback = callback
+
+@app.post("/restart")
+async def restart_bot(request: Request):
+    if restart_callback:
+        restart_callback()
+        return RedirectResponse(url="/?restarted=true", status_code=303)
+    return HTMLResponse("Error: No restart callback set", status_code=500)
+
 @app.post("/update_config")
 async def update_config(
     request: Request,
@@ -25,6 +38,7 @@ async def update_config(
     bot_token: str = Form(...),
     system_prompt: str = Form(...),
     reply_probability: float = Form(...),
+    developer_id: str = Form(...),
     gemini_keys: str = Form(...) # Recibiremos las keys como texto separado por líneas
 ):
     # Procesar keys
@@ -35,6 +49,7 @@ async def update_config(
     config.set("bot_token", bot_token)
     config.set("system_prompt", system_prompt)
     config.set("reply_probability", reply_probability)
+    config.set("developer_id", developer_id)
     config.set("gemini_keys", keys_list)
     
     return RedirectResponse(url="/?saved=true", status_code=303)
