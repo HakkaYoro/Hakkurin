@@ -148,8 +148,15 @@ REGLAS DE COMPORTAMIENTO:
 """
 
         try:
+            # Selección dinámica de modelo
+            # gemini-2.5-flash y gemini-3-flash tienen cuotas separadas, así que balanceamos carga
+            available_models = ["gemini-2.5-flash", "gemini-3-flash"]
+            selected_model = random.choice(available_models)
+            
+            # print(f"Usando modelo: {selected_model}") # Debug
+
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=selected_model,
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.85,
@@ -168,23 +175,33 @@ REGLAS DE COMPORTAMIENTO:
             return json.loads(text_response)
 
         except Exception as e:
-            print(f"Error generando respuesta JSON: {e}")
-            if "429" in str(e) or "403" in str(e) or "quota" in str(e).lower():
-                print("Posible error de cuota/auth, rotando key...")
+            print(f"Error generando respuesta JSON con {selected_model}: {e}")
+            
+            # Lógica de reintento y fallback
+            is_quota_error = "429" in str(e) or "403" in str(e) or "quota" in str(e).lower()
+            
+            if is_quota_error:
+                print("Posible error de cuota/auth, rotando key y cambiando modelo...")
                 self._rotate_key()
-                try:
-                    if self.client:
-                         response = self.client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=full_prompt,
-                             config=types.GenerateContentConfig(response_mime_type="application/json")
-                        )
-                         text_response = response.text.strip()
-                         if text_response.startswith("```"):
-                            text_response = text_response.strip("`").replace("json\n", "").strip()
-                         return json.loads(text_response)
-                except Exception as e2:
-                    return {"intent": "error", "response_content": [f"Error crítico de IA: {e2}"]}
+            else:
+                print("Error genérico, intentando con el otro modelo...")
+
+            # Intentar con el OTRO modelo (si falló 2.5, probar 3, y viceversa)
+            fallback_model = "gemini-3-flash" if selected_model == "gemini-2.5-flash" else "gemini-2.5-flash"
+            
+            try:
+                if self.client:
+                        response = self.client.models.generate_content(
+                        model=fallback_model,
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(response_mime_type="application/json")
+                    )
+                        text_response = response.text.strip()
+                        if text_response.startswith("```"):
+                        text_response = text_response.strip("`").replace("json\n", "").strip()
+                        return json.loads(text_response)
+            except Exception as e2:
+                return {"intent": "error", "response_content": [f"Error crítico de IA ({fallback_model}): {e2}"]}
             
             return {"intent": "ignore", "response_content": [], "thought_process": f"Error: {e}"}
 
@@ -221,8 +238,12 @@ SALIDA:
 Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. Texto plano estructurado.
 """
         try:
+            # Selección dinámica también para resúmenes
+            available_models = ["gemini-2.5-flash", "gemini-3-flash"]
+            selected_model = random.choice(available_models)
+
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=selected_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.3, # Baja temperatura para ser preciso y factual

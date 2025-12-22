@@ -161,7 +161,20 @@ class HakkurinBot(discord.Client):
 
         # Normalizar a lista si por alguna razón llega string
         if isinstance(response_content, str):
-            response_content = [response_content]
+            # Intentar corregir si es un string que parece una lista "['a', 'b']"
+            response_content = response_content.strip()
+            if response_content.startswith("[") and response_content.endswith("]"):
+                try:
+                    import ast
+                    parsed = ast.literal_eval(response_content)
+                    if isinstance(parsed, list):
+                        response_content = parsed
+                    else:
+                        response_content = [response_content]
+                except:
+                    response_content = [response_content]
+            else:
+                response_content = [response_content]
 
         # Actualizar estado de sesión según si nos hablan
         if not is_talking_to_me and session.is_active:
