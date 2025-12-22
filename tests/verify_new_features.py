@@ -64,9 +64,15 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(mem["history_buffer"]), 0)
         print("✅ Item reciente se mantiene en cola (no pasa a permanente).")
         
-        # 3. Simular paso del tiempo (31 min)
+        # 2.5 Verificar acceso inmediato vía get_memory_summary
+        summary_text = self.memory.get_memory_summary(user_id)
+        self.assertIn("MEMORIA RECIENTE", summary_text)
+        self.assertIn("Mensaje 1", summary_text)
+        print("✅ Item en cola es visible inmediatamente en el resumen.")
+
+        # 3. Simular paso del tiempo (6 min, > 5 min)
         # Hack: Modificar timestamp del archivo directamente
-        queue[0]["timestamp"] -= 1900 # Restar 1900 segundos
+        queue[0]["timestamp"] -= 400 # Restar 400 segundos (5 min = 300s)
         self.memory._save_queue(queue)
         
         # 4. Procesar de nuevo
@@ -75,7 +81,7 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         
         self.assertEqual(len(mem["history_buffer"]), 1)
         self.assertEqual(mem["history_buffer"][0], "Mensaje 1")
-        print("✅ Item antiguo (>30 min) movido a memoria permanente.")
+        print("✅ Item antiguo (>5 min) movido a memoria permanente.")
 
     def test_batch_summarization_trigger(self):
         print("\n--- Test: Trigger de Resumen por Lotes (20 msgs) ---")
@@ -127,24 +133,9 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         brain = GeminiBrain()
         brain.client = mock_client
 
-        # --- CASO 1: Fallo de Primarios -> Éxito en Flash Lite ---
-        print("\n[Caso 1] Primarios fallan, Flash Lite funciona:")
-        async def mock_generate_lite(func, model, contents, config):
-            print(f"  -> Mock intentando con: {model}")
-            if "preview" in model or "flash" in model and "lite" not in model:
-                raise Exception("429 Resource Exhausted")
-            if "lite" in model:
-                mock_resp = MagicMock()
-                mock_resp.text = f"Contenido generado por {model}"
-                return mock_resp
-            raise Exception("Modelo inesperado")
-
-        with patch('asyncio.to_thread', side_effect=mock_generate_lite):
-            # Resetear estado
-            brain.fallback_until = 0 
-            result = await brain._generate_with_retry("test", None, is_json=False)
-            print(f"  RESULTADO: {result}")
-            self.assertIn("gemini-2.5-flash-lite", result)
+        # --- CASO 1: ELIMINADO (Flash Lite ya no se usa) ---
+        # Se mantiene el código para referencia o futura expansión
+        pass
 
         # --- CASO 2: Fallo de Primarios Y Lite -> Éxito en Gemma ---
         print("\n[Caso 2] Primarios y Lite fallan, Gemma funciona:")

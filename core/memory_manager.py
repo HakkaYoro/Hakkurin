@@ -149,6 +149,11 @@ class MemoryManager:
         if summary:
             final_text += f"RESUMEN DETALLADO A LARGO PLAZO:\n{summary}\n"
         
+        # Inyectar memoria temporal (Cola)
+        queued_msgs = self.get_queued_interactions(user_id)
+        if queued_msgs:
+            final_text += f"MEMORIA RECIENTE (No procesada):\n" + "\n".join(queued_msgs) + "\n"
+        
         if profile.get("name"):
             final_text += f"Nombre: {profile['name']}\n"
         if profile.get("likes"):
@@ -211,6 +216,13 @@ class MemoryManager:
         })
         self._save_queue(queue)
 
+    def get_queued_interactions(self, user_id):
+        """Recupera interacciones recientes de la cola para este usuario."""
+        queue = self._load_queue()
+        user_id = str(user_id)
+        # Filtrar mensajes de este usuario
+        return [item["text"] for item in queue if item.get("user_id") == user_id]
+
     def process_queue(self):
         """
         Mueve items de la cola temporal a la permanente si tienen > 30 min.
@@ -224,8 +236,8 @@ class MemoryManager:
         new_queue = []
         users_to_summarize = set()
         
-        # 30 minutos = 1800 segundos
-        DELAY_SECONDS = 1800 
+        # 5 minutos = 300 segundos (Antes 30 min)
+        DELAY_SECONDS = 300 
 
         for item in queue:
             if now - item["timestamp"] > DELAY_SECONDS:
