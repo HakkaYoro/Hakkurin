@@ -6,11 +6,11 @@ from core.memory_manager import MemoryManager
 class TestMemoryManager(unittest.TestCase):
     def setUp(self):
         # Usar directorio de memoria de prueba
-        self.test_memory_dir = "memory_test"
-        self.test_key_file = "memory_test/secret.key"
+        self.test_base_dir = "memory_test"
+        self.test_memory_dir = os.path.join(self.test_base_dir, "users")
+        self.test_key_file = os.path.join(self.test_base_dir, "secret.key")
         
-        # Monkey patch de las rutas en la clase (si fuera posible) o instanciar con rutas custom.
-        # Como están hardcodeadas en el módulo, vamos a modificar las variables globales del módulo.
+        # Monkey patch de las rutas en la clase
         import core.memory_manager
         self.original_dir = core.memory_manager.MEMORY_DIR
         self.original_key = core.memory_manager.KEY_FILE
@@ -22,8 +22,8 @@ class TestMemoryManager(unittest.TestCase):
         self.mm = MemoryManager()
 
     def tearDown(self):
-        if os.path.exists(self.test_memory_dir):
-            shutil.rmtree(self.test_memory_dir)
+        if os.path.exists(self.test_base_dir):
+            shutil.rmtree(self.test_base_dir)
         
         # Restaurar
         import core.memory_manager
@@ -50,7 +50,7 @@ class TestMemoryManager(unittest.TestCase):
         data = {"secret": "hidden"}
         self.mm.save_memory(user_id, data)
         
-        file_path = os.path.join(self.test_memory_dir, "users", f"{user_id}.enc")
+        file_path = os.path.join(self.test_memory_dir, f"{user_id}.enc")
         with open(file_path, "rb") as f:
             content = f.read()
         

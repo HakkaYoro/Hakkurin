@@ -13,7 +13,7 @@ class Session:
         self.last_interaction = time.time()
         self.is_active = True
         self.ignored_count = 0
-        self.context_messages = [] # Lista de strings para contexto inmediato
+        self.context_messages = [] # Lista de dicts: {'timestamp': float, 'content': str}
 
     def update_interaction(self):
         self.last_interaction = time.time()
@@ -21,9 +21,18 @@ class Session:
         self.is_active = True
 
     def add_context(self, message):
-        self.context_messages.append(message)
-        if len(self.context_messages) > 10: # Mantener solo los últimos 10
-            self.context_messages.pop(0)
+        now = time.time()
+        self.context_messages.append({'timestamp': now, 'content': message})
+        self._cleanup_context(now)
+
+    def _cleanup_context(self, now):
+        # Mantener solo mensajes de las últimas 24 horas (86400 segundos)
+        cutoff = now - 86400
+        self.context_messages = [msg for msg in self.context_messages if msg['timestamp'] > cutoff]
+
+    def get_context_text(self):
+        # Retorna solo el texto para la IA
+        return [msg['content'] for msg in self.context_messages]
 
 class ConversationManager:
     _instance = None
@@ -84,7 +93,7 @@ class ConversationManager:
                 fake_msg = "[SISTEMA]: El usuario ha dejado de responder por 5 minutos. ¿Quieres decir algo antes de irte? (Si no, responde con intent: ignore)"
                 
                 try:
-                    analysis = await brain.analyze_interaction(fake_msg, mem_summary, session.context_messages, is_session_active=True)
+                    analysis = await brain.analyze_interaction(fake_msg, mem_summary, session.get_context_text(), is_session_active=True)
                     
                     if analysis.get("intent") in ["complain", "reply", "new_topic"] and analysis.get("response_content"):
                         await bot_send_message_callback(session.channel_id, analysis["response_content"])
