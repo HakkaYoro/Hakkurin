@@ -112,49 +112,71 @@
             display: none;
         }
     </style>
-    <input type="text" id="bot_name" name="bot_name" value="{{ config.bot_name }}">
-    </div>
+</head>
 
-    <div class="form-group">
-        <label for="bot_token">Discord Bot Token</label>
-        <input type="text" id="bot_token" name="bot_token" value="{{ config.bot_token }}">
-    </div>
+<body>
+    <div class="container">
+        <h1>Hakkurin Dashboard</h1>
 
-    <div class="form-group">
-        <label for="gemini_keys">Gemini API Keys (Una por línea)</label>
-        <textarea id="gemini_keys" name="gemini_keys" rows="4">{% for key in config.gemini_keys %}{{ key }}
+        <div id="success-msg" class="alert">
+            ¡Configuración guardada exitosamente!
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <a href="/memories" style="text-decoration: none;">
+                <button type="button" style="background: linear-gradient(45deg, #8be9fd, #50fa7b); color: #282a36;">
+                    🧠 Ver Memorias de Usuarios
+                </button>
+            </a>
+        </div>
+
+        <div class="card">
+            <form action="/update_config" method="post">
+                <div class="form-group">
+                    <label for="bot_name">Nombre del Bot</label>
+                    <input type="text" id="bot_name" name="bot_name" value="{{ config.bot_name }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="bot_token">Discord Bot Token</label>
+                    <input type="text" id="bot_token" name="bot_token" value="{{ config.bot_token }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="gemini_keys">Gemini API Keys (Una por línea)</label>
+                    <textarea id="gemini_keys" name="gemini_keys" rows="4">{% for key in config.gemini_keys %}{{ key }}
 {% endfor %}</textarea>
-    </div>
+                </div>
 
-    <div class="form-group">
-        <label for="reply_probability">Probabilidad de Respuesta (0.0 - 1.0)</label>
-        <input type="number" id="reply_probability" name="reply_probability" step="0.01" min="0" max="1"
-            value="{{ config.reply_probability }}">
-    </div>
+                <div class="form-group">
+                    <label for="reply_probability">Probabilidad de Respuesta (0.0 - 1.0)</label>
+                    <input type="number" id="reply_probability" name="reply_probability" step="0.01" min="0" max="1"
+                        value="{{ config.reply_probability }}">
+                </div>
 
-    <div class="form-group">
-        <label for="system_prompt">System Prompt (Personalidad)</label>
-        <textarea id="system_prompt" name="system_prompt" rows="6">{{ config.system_prompt }}</textarea>
-    </div>
+                <div class="form-group">
+                    <label for="system_prompt">System Prompt (Personalidad)</label>
+                    <textarea id="system_prompt" name="system_prompt" rows="6">{{ config.system_prompt }}</textarea>
+                </div>
 
-    <div class="form-group">
-        <label for="developer_id">ID de Desarrollador (Discord User ID)</label>
-        <input type="text" id="developer_id" name="developer_id" value="{{ config.developer_id }}">
-    </div>
+                <div class="form-group">
+                    <label for="developer_id">ID de Desarrollador (Discord User ID)</label>
+                    <input type="text" id="developer_id" name="developer_id" value="{{ config.developer_id }}">
+                </div>
 
-    <button type="submit">Guardar Cambios</button>
-    </form>
-    </div>
+                <button type="submit">Guardar Cambios</button>
+            </form>
+        </div>
 
-    <div class="card" style="margin-top: 20px; border-color: #ff5555;">
-        <h2 style="color: #ff5555; text-align: center; margin-top: 0;">Zona de Peligro / Control</h2>
-        <form action="/restart" method="post">
-            <p style="text-align: center; color: #aaa;">Reiniciar aplicará cambios y forzará el resumen de memorias
-                pendientes.</p>
-            <button type="submit" style="background: linear-gradient(45deg, #ff5555, #ffb86c);">⚠️ Reiniciar Bot y
-                Recargar Memorias ⚠️</button>
-        </form>
-    </div>
+        <div class="card" style="margin-top: 20px; border-color: #ff5555;">
+            <h2 style="color: #ff5555; text-align: center; margin-top: 0;">Zona de Peligro / Control</h2>
+            <form action="/restart" method="post">
+                <p style="text-align: center; color: #aaa;">Reiniciar aplicará cambios y forzará el resumen de memorias
+                    pendientes.</p>
+                <button type="submit" style="background: linear-gradient(45deg, #ff5555, #ffb86c);">⚠️ Reiniciar Bot y
+                    Recargar Memorias ⚠️</button>
+            </form>
+        </div>
     </div>
 
     <script>
@@ -173,6 +195,6 @@
             window.history.replaceState({}, document.title, "/");
         }
     </script>
-    </body>
+</body>
 
 </html>
