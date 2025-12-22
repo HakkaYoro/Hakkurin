@@ -49,6 +49,12 @@ class GeminiBrain:
         self.client = None
         # Tracking de uso por key (índice -> KeyUsage)
         self.key_usage = {} 
+        
+        # Estado de Fallback
+        self.fallback_until = 0 # Timestamp hasta cuando usar fallback
+        self.gemma_tokens_this_minute = 0
+        self.gemma_last_reset = 0
+        
         self._initialize_client()
 
     def _get_usage(self, index):
@@ -102,24 +108,66 @@ class GeminiBrain:
         self.current_key_index = (self.current_key_index + 1) % len(self.keys)
         self._initialize_client()
 
+    def _check_gemma_limit(self, estimated_tokens):
+        """Verifica y actualiza el límite de tokens para Gemma (15k/min)."""
+        now = time.time()
+        if now - self.gemma_last_reset > 60:
+            self.gemma_tokens_this_minute = 0
+            self.gemma_last_reset = now
+        
+        if self.gemma_tokens_this_minute + estimated_tokens > 15000:
+            return False
+        return True
+
+    def _update_gemma_usage(self, tokens):
+        self.gemma_tokens_this_minute += tokens
+
     async def _generate_with_retry(self, prompt, config_gen, is_json=False):
         """
         Intenta generar contenido manejando rotación de keys y cambio de modelo.
         """
-        # Modelos disponibles (gemini-3-flash-preview y gemini-2.5-flash)
-        available_models = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+        import asyncio
         
-        # Intentar primero con un modelo aleatorio para balancear
-        primary_model = random.choice(available_models)
-        models_to_try = [primary_model] + [m for m in available_models if m != primary_model]
+        PRIMARY_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+        FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemma-3-27b"]
         
+        # Determinar orden de modelos
+        now = time.time()
+        use_fallback = False
+        
+        if now < self.fallback_until:
+            print(f"Modo Fallback activo (restan {int(self.fallback_until - now)}s). Usando modelos ligeros.")
+            # En modo fallback, probamos SOLO los fallback primero, y si fallan, quizás los primarios (por si acaso)
+            # Pero el usuario pidió "revisar cada 40 min", lo que implica quedarse en fallback.
+            models_to_try = FALLBACK_MODELS
+            use_fallback = True
+        else:
+            # Modo normal: Primarios primero
+            # Randomizar primarios para balanceo
+            p_models = list(PRIMARY_MODELS)
+            random.shuffle(p_models)
+            models_to_try = p_models + FALLBACK_MODELS
+
         last_error = None
 
-        import asyncio
-
         for model_name in models_to_try:
+            # Lógica específica para Gemma
+            if model_name == "gemma-3-27b":
+                # Estimar tokens de entrada (muy aprox: chars / 4)
+                # prompt puede ser string o lista de Parts
+                input_text_len = 0
+                if isinstance(prompt, str):
+                    input_text_len = len(prompt)
+                elif isinstance(prompt, list):
+                    for p in prompt:
+                        if hasattr(p, 'text') and p.text: input_text_len += len(p.text)
+                
+                estimated_tokens = input_text_len // 4
+                if not self._check_gemma_limit(estimated_tokens):
+                    print(f"Límite de tokens de Gemma excedido ({self.gemma_tokens_this_minute}/15000). Saltando modelo.")
+                    continue
+
             # Intentar con el modelo actual (y rotar keys si es necesario)
-            # Haremos hasta 2 intentos por modelo (uno con la key actual, otro tras rotar si hay error de cuota)
             for attempt in range(2):
                 if not self.client:
                     self._initialize_client()
@@ -127,8 +175,7 @@ class GeminiBrain:
                         return None # No hay keys vivas
 
                 try:
-                    # Ejecutar la llamada bloqueante en un thread separado para no bloquear el loop
-                    # Esto permite que la tarea sea cancelable desde fuera (discord_client)
+                    # Ejecutar la llamada bloqueante en un thread separado
                     response = await asyncio.to_thread(
                         self.client.models.generate_content,
                         model=model_name,
@@ -137,6 +184,24 @@ class GeminiBrain:
                     )
                     
                     text_response = response.text.strip()
+                    
+                    # Si tuvimos éxito con un modelo de fallback y NO estábamos forzados, activar modo fallback
+                    if model_name in FALLBACK_MODELS and not use_fallback:
+                        print("Primarios fallaron, activando Modo Fallback por 40 minutos.")
+                        self.fallback_until = time.time() + 2400 # 40 minutos
+                    
+                    # Si tuvimos éxito con un modelo primario y estábamos en fallback (el tiempo expiró), limpiar
+                    if model_name in PRIMARY_MODELS and use_fallback:
+                         # Esto no debería pasar si use_fallback=True porque solo probamos FALLBACK_MODELS
+                         # Pero si cambiamos la lógica arriba, aquí resetearíamos.
+                         pass
+
+                    # Actualizar uso de Gemma si aplica
+                    if model_name == "gemma-3-27b":
+                        # Estimar salida
+                        out_tokens = len(text_response) // 4
+                        self._update_gemma_usage(estimated_tokens + out_tokens)
+
                     if is_json:
                         if text_response.startswith("```"):
                             text_response = text_response.strip("`").replace("json\n", "").strip()
@@ -155,16 +220,14 @@ class GeminiBrain:
                     if is_quota:
                         print("Error de cuota detectado. Rotando key...")
                         self._rotate_key()
-                        # El loop 'attempt' volverá a probar con la nueva key y el MISMO modelo
                         continue
                     elif is_not_found:
-                        print("Modelo no encontrado o no soportado. Cambiando de modelo...")
-                        break # Salir del loop de intentos de ESTE modelo y pasar al siguiente en models_to_try
+                        print("Modelo no encontrado. Cambiando...")
+                        break 
                     else:
-                        # Error genérico (500, etc), quizás probar otro modelo ayude
                         break 
         
-        # Si llegamos aquí, fallaron todos los modelos/intentos
+        # Si llegamos aquí, fallaron todos
         print(f"Fallaron todos los intentos. Último error: {last_error}")
         if is_json:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
