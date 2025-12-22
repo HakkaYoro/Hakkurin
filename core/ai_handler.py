@@ -186,5 +186,52 @@ REGLAS DE COMPORTAMIENTO:
             
             return {"intent": "ignore", "response_content": [], "thought_process": f"Error: {e}"}
 
+    async def generate_summary(self, current_summary, recent_interactions):
+        """
+        Genera un resumen detallado y actualizado del usuario basado en su historial reciente.
+        """
+        if not self.client:
+            self._initialize_client()
+            if not self.client:
+                return current_summary # Si no hay IA, devolvemos lo que había
+
+        # Registrar uso
+        self._get_usage(self.current_key_index).register_request()
+
+        prompt = f"""
+TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil psicológico y factual de un usuario.
+
+RESUMEN ACTUAL (Lo que sabíamos hasta ahora):
+{current_summary if current_summary else "No hay información previa."}
+
+NUEVAS INTERACCIONES (Últimos 20 mensajes):
+{chr(10).join(recent_interactions)}
+
+INSTRUCCIONES:
+1. Analiza las nuevas interacciones y combínalas con el resumen actual.
+2. Genera un NUEVO RESUMEN DETALLADO Y EXTENSO.
+3. No pierdas datos importantes anteriores (nombres, fechas, gustos, hechos clave).
+4. Si hay información contradictoria, prioriza la más reciente pero anota la contradicción.
+5. El tono del resumen debe ser técnico y analítico, enfocado en hechos y psicología del usuario.
+6. Extrae: Nombre, Edad, Gustos, Disgustos, Estilo de habla, Relación con la IA, Datos curiosos.
+
+SALIDA:
+Devuelve SOLO el texto del nuevo resumen. No uses JSON ni markdown de código. Texto plano estructurado.
+"""
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3, # Baja temperatura para ser preciso y factual
+                    top_p=0.95,
+                    top_k=40
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            print(f"Error generando resumen de memoria: {e}")
+            return current_summary
+
 # Instancia global
 brain = GeminiBrain()

@@ -196,20 +196,39 @@ class HakkurinBot(discord.Client):
         
         elif intent == "ignore":
             print(f"Ignorando mensaje de {user_name} (Intención: ignore)")
-            # Si nos ignoran explícitamente, podríamos cerrar la sesión para no gastar recursos
-            if not is_talking_to_me:
-                # Opcional: conversation_manager.end_session(message.channel.id, message.author.id)
-                pass
+            pass
 
     async def update_user_memory(self, user_id, user_name, user_text, bot_text):
         try:
+            # Actualizar nombre si no existe
             current_mem = memory.get_memory(user_id)
             if not current_mem["profile"]["name"]:
                 current_mem["profile"]["name"] = user_name
-            current_mem["interaction_count"] += 1
-            memory.save_memory(user_id, current_mem)
+                memory.save_memory(user_id, current_mem)
+
+            # Añadir interacción al buffer
+            interaction_text = f"Usuario: {user_text}\nBot: {bot_text}"
+            should_summarize = memory.add_interaction(user_id, interaction_text)
+            
+            if should_summarize:
+                print(f"Iniciando resumen de memoria para {user_name}...")
+                asyncio.create_task(self.perform_memory_summarization(user_id))
+                
         except Exception as e:
             print(f"Error actualizando memoria: {e}")
+
+    async def perform_memory_summarization(self, user_id):
+        try:
+            current_summary, buffer = memory.get_buffer_and_summary(user_id)
+            if not buffer: return
+
+            new_summary = await brain.generate_summary(current_summary, buffer)
+            
+            if new_summary:
+                memory.update_summary(user_id, new_summary)
+                print(f"Resumen de memoria actualizado para {user_id}")
+        except Exception as e:
+            print(f"Error en proceso de resumen: {e}")
 
 # Instancia global
 bot_client = HakkurinBot()

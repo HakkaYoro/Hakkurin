@@ -67,22 +67,56 @@ class MemoryManager:
             },
             "interaction_count": 0,
             "last_topics": [],
-            "notes": "Usuario nuevo."
+            "notes": "Usuario nuevo.",
+            "summary": "", # Resumen a largo plazo generado por IA
+            "history_buffer": [] # Buffer de mensajes recientes para el próximo resumen
         }
+
+    def add_interaction(self, user_id, interaction_text):
+        """Añade una interacción al buffer y devuelve True si es hora de resumir."""
+        mem = self.get_memory(user_id)
+        
+        # Asegurar que existan los campos nuevos en memorias viejas
+        if "history_buffer" not in mem: mem["history_buffer"] = []
+        if "summary" not in mem: mem["summary"] = ""
+        
+        mem["history_buffer"].append(interaction_text)
+        mem["interaction_count"] += 1
+        
+        should_summarize = len(mem["history_buffer"]) >= 20
+        self.save_memory(user_id, mem)
+        
+        return should_summarize
+
+    def get_buffer_and_summary(self, user_id):
+        mem = self.get_memory(user_id)
+        return mem.get("summary", ""), mem.get("history_buffer", [])
+
+    def update_summary(self, user_id, new_summary):
+        """Actualiza el resumen y limpia el buffer."""
+        mem = self.get_memory(user_id)
+        mem["summary"] = new_summary
+        mem["history_buffer"] = [] # Limpiar buffer
+        self.save_memory(user_id, mem)
 
     def get_memory_summary(self, user_id):
         """Devuelve un string resumen para inyectar en el prompt."""
         mem = self.get_memory(user_id)
         profile = mem.get("profile", {})
         notes = mem.get("notes", "")
+        summary = mem.get("summary", "")
         
-        summary = f"Notas: {notes}\n"
+        # Construir el texto que verá la IA
+        final_text = f"Notas Básicas: {notes}\n"
+        if summary:
+            final_text += f"RESUMEN DETALLADO A LARGO PLAZO:\n{summary}\n"
+        
         if profile.get("name"):
-            summary += f"Nombre: {profile['name']}\n"
+            final_text += f"Nombre: {profile['name']}\n"
         if profile.get("likes"):
-            summary += f"Gustos: {', '.join(profile['likes'])}\n"
+            final_text += f"Gustos: {', '.join(profile['likes'])}\n"
         
-        return summary
+        return final_text
 
 # Instancia global
 memory = MemoryManager()
