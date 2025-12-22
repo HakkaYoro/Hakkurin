@@ -37,6 +37,24 @@ class Session:
         # Retorna solo el texto para la IA
         return [msg['content'] for msg in self.context_messages]
 
+class ChannelContext:
+    def __init__(self, channel_id):
+        self.channel_id = channel_id
+        self.messages = [] # Lista de dicts: {'timestamp': float, 'content': str, 'author': str}
+
+    def add_message(self, author_name, content):
+        now = time.time()
+        self.messages.append({'timestamp': now, 'content': content, 'author': author_name})
+        self._cleanup(now)
+
+    def _cleanup(self, now):
+        # Mantener últimos 50 mensajes o 24 horas
+        cutoff = now - 86400
+        self.messages = [msg for msg in self.messages if msg['timestamp'] > cutoff][-50:]
+
+    def get_formatted_history(self):
+        return [f"{msg['author']}: {msg['content']}" for msg in self.messages]
+
 class ConversationManager:
     _instance = None
 
@@ -44,25 +62,37 @@ class ConversationManager:
         if cls._instance is None:
             cls._instance = super(ConversationManager, cls).__new__(cls)
             cls._instance.sessions = {} # Key: (channel_id, user_id) -> Session
+            cls._instance.channels = {} # Key: channel_id -> ChannelContext
             cls._instance._start_cleanup_task()
         return cls._instance
 
     def _start_cleanup_task(self):
-        # Tarea de fondo para chequear timeouts (se iniciará al importar o llamar explícitamente)
-        # Nota: En un entorno real, esto debería manejarse con cuidado en el event loop de Discord
         pass 
 
     def get_session(self, channel_id, user_id):
         key = (channel_id, user_id)
         return self.sessions.get(key)
 
-    def create_or_update_session(self, channel_id, user_id):
+    def get_channel_context(self, channel_id):
+        if channel_id not in self.channels:
+            self.channels[channel_id] = ChannelContext(channel_id)
+        return self.channels[channel_id]
+
+    def create_or_update_session(self, channel_id, user_id, user_name=None, message_content=None):
+        # Actualizar sesión de usuario
         key = (channel_id, user_id)
         if key not in self.sessions:
             self.sessions[key] = Session(channel_id, user_id)
             print(f"Nueva sesión creada para {user_id} en {channel_id}")
         else:
             self.sessions[key].update_interaction()
+        
+        # Actualizar contexto del canal si hay mensaje
+        if user_name and message_content:
+            self.get_channel_context(channel_id).add_message(user_name, message_content)
+            # También añadimos al contexto personal por si acaso, aunque usaremos el global
+            self.sessions[key].add_context(f"{user_name}: {message_content}")
+
         return self.sessions[key]
 
     def end_session(self, channel_id, user_id):
@@ -90,13 +120,13 @@ class ConversationManager:
                 # Oportunidad para que la IA se queje o se despida
                 # Recuperamos memoria para contexto
                 mem_summary = memory.get_memory_summary(session.user_id)
+                channel_history = self.get_channel_context(session.channel_id).get_formatted_history()
                 
                 # Pedimos a la IA una reacción de "cierre por timeout"
-                # Simulamos un mensaje de sistema interno
                 fake_msg = "[SISTEMA]: El usuario ha dejado de responder por 5 minutos. ¿Quieres decir algo antes de irte? (Si no, responde con intent: ignore)"
                 
                 try:
-                    analysis = await brain.analyze_interaction(fake_msg, mem_summary, session.get_context_text(), is_session_active=True)
+                    analysis = await brain.analyze_interaction(fake_msg, mem_summary, channel_history, is_session_active=True)
                     
                     if analysis.get("intent") in ["complain", "reply", "new_topic"] and analysis.get("response_content"):
                         await bot_send_message_callback(session.channel_id, analysis["response_content"])
