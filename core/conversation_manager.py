@@ -41,11 +41,19 @@ class ChannelContext:
     def __init__(self, channel_id):
         self.channel_id = channel_id
         self.messages = [] # Lista de dicts: {'timestamp': float, 'content': str, 'author': str}
+        self.last_bot_activity = 0 # Timestamp de la última vez que el bot habló aquí
 
     def add_message(self, author_name, author_id, content):
         now = time.time()
         self.messages.append({'timestamp': now, 'content': content, 'author': author_name, 'author_id': author_id})
         self._cleanup(now)
+
+    def update_bot_activity(self):
+        self.last_bot_activity = time.time()
+
+    def is_bot_engaged(self, timeout=60):
+        """Retorna True si el bot ha estado activo recientemente en este canal."""
+        return (time.time() - self.last_bot_activity) < timeout
 
     def _cleanup(self, now):
         # Mantener últimos 50 mensajes o 24 horas

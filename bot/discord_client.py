@@ -80,7 +80,10 @@ class HakkurinBot(discord.Client):
         is_reply = (message.reference and message.reference.cached_message and 
                     message.reference.cached_message.author == self.user)
         
-        should_process = is_mentioned or is_reply or was_active
+        # Verificar si el bot está "enganchado" en la conversación del canal (habló hace poco)
+        is_channel_engaged = conversation_manager.get_channel_context(message.channel.id).is_bot_engaged()
+        
+        should_process = is_mentioned or is_reply or was_active or is_channel_engaged
         
         if not should_process:
             reply_prob = config.get("reply_probability", 0.05)
@@ -202,7 +205,9 @@ class HakkurinBot(discord.Client):
                 await asyncio.sleep(random.uniform(0.2, 0.5))
             
             # Añadir respuesta completa al contexto GLOBAL
-            conversation_manager.get_channel_context(message.channel.id).add_message(config.get('bot_name'), str(self.user.id), full_response_text.strip())
+            channel_ctx = conversation_manager.get_channel_context(message.channel.id)
+            channel_ctx.add_message(config.get('bot_name'), str(self.user.id), full_response_text.strip())
+            channel_ctx.update_bot_activity() # Marcar que el bot está activo en este canal
             
             # Actualizar memoria (fire and forget)
             asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, full_response_text.strip()))
