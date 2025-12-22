@@ -98,7 +98,7 @@ class HakkurinBot(discord.Client):
         should_process = is_mentioned or is_reply or was_active or is_channel_engaged
         
         if not should_process:
-            reply_prob = config.get("reply_probability", 0.05)
+            reply_prob = config.get("reply_probability", 0.01) # Reducido a 1% para evitar spam inicial
             if random.random() < reply_prob:
                 should_process = True
                 print(f"Trigger por probabilidad ({reply_prob}) para {message.author.display_name}")
@@ -198,9 +198,28 @@ class HakkurinBot(discord.Client):
                     else:
                         response_content = [response_content]
                 except:
+                    # Si falla el eval, asumimos que es un string normal con corchetes
                     response_content = [response_content]
             else:
                 response_content = [response_content]
+        
+        # Segunda pasada de limpieza: Si la lista contiene strings que parecen listas "['texto']"
+        # Esto corrige el bug visual reportado
+        final_content = []
+        for item in response_content:
+            if isinstance(item, str) and item.startswith("[") and item.endswith("]"):
+                 try:
+                    import ast
+                    parsed = ast.literal_eval(item)
+                    if isinstance(parsed, list):
+                        final_content.extend(parsed)
+                    else:
+                        final_content.append(item)
+                 except:
+                    final_content.append(item)
+            else:
+                final_content.append(item)
+        response_content = final_content
 
         # Actualizar estado de sesión según si nos hablan
         if not is_talking_to_me and session.is_active:
