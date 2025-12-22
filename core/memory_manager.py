@@ -132,5 +132,31 @@ class MemoryManager:
         
         return final_text
 
+    def update_last_channel(self, user_id, channel_id):
+        """Actualiza el último canal donde se vio al usuario."""
+        mem = self.get_memory(user_id)
+        mem["last_channel_id"] = channel_id
+        self.save_memory(user_id, mem)
+
+    def get_all_users_data(self):
+        """
+        Devuelve una lista de dicts con datos básicos de todos los usuarios para eventos globales.
+        Retorna: [{'user_id': str, 'last_channel_id': int, 'summary': str}, ...]
+        """
+        users_data = []
+        if not os.path.exists(MEMORY_DIR):
+            return users_data
+            
+        for filename in os.listdir(MEMORY_DIR):
+            if filename.endswith(".enc"):
+                user_id = filename.replace(".enc", "")
+                mem = self.get_memory(user_id)
+                users_data.append({
+                    'user_id': user_id,
+                    'last_channel_id': mem.get('last_channel_id'),
+                    'summary': self.get_memory_summary(user_id)
+                })
+        return users_data
+
 # Instancia global
 memory = MemoryManager()

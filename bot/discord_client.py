@@ -20,10 +20,13 @@ class HakkurinBot(discord.Client):
     async def setup_hook(self):
         # Iniciar tarea de fondo para timeouts
         self.check_timeouts_task.start()
+        # Iniciar tarea de festividades
+        self.check_holidays_task.start()
 
     async def on_ready(self):
         print(f'Conectado como {self.user} (ID: {self.user.id})')
         print('------')
+
 
     async def on_typing(self, channel, user, when):
         """Detecta cuando alguien está escribiendo."""
@@ -284,6 +287,9 @@ class HakkurinBot(discord.Client):
             channel_ctx.add_message(config.get('bot_name'), str(self.user.id), full_response_text.strip())
             channel_ctx.update_bot_activity() # Marcar que el bot está activo en este canal
             
+            # Guardar último canal conocido para festividades
+            memory.update_last_channel(user_id, message.channel.id)
+
             # Actualizar memoria (fire and forget)
             asyncio.create_task(self.update_user_memory(user_id, user_name, user_text, full_response_text.strip()))
         
@@ -336,6 +342,81 @@ class HakkurinBot(discord.Client):
         
         print("Cerrando conexión con Discord...")
         await self.close()
+
+    @tasks.loop(seconds=60)
+    async def check_holidays_task(self):
+        """Revisa si es momento de celebrar una festividad."""
+        from datetime import datetime, timezone, timedelta
+        import json
+        import os
+
+        # Hora actual GMT-4
+        tz = timezone(timedelta(hours=-4))
+        now = datetime.now(tz)
+        
+        # Archivo de persistencia de festividades
+        HOLIDAY_FILE = "data/holidays.json"
+        if not os.path.exists(HOLIDAY_FILE):
+            with open(HOLIDAY_FILE, "w") as f: json.dump({}, f)
+        
+        try:
+            with open(HOLIDAY_FILE, "r") as f:
+                holiday_data = json.load(f)
+        except:
+            holiday_data = {}
+
+        # Definir eventos: (mes, dia, hora, minuto, key_name, holiday_display_name)
+        # Navidad: 25 Dic 00:01
+        # Año Nuevo: 1 Ene 00:00 (El usuario dijo 00:00:01, chequeamos minuto 0)
+        events = [
+            (12, 25, 0, 1, "xmas", "Navidad"),
+            (1, 1, 0, 0, "newyear", "Año Nuevo")
+        ]
+
+        current_year = str(now.year)
+
+        for month, day, hour, minute, key, name in events:
+            if now.month == month and now.day == day and now.hour == hour and now.minute == minute:
+                event_key = f"{key}_{current_year}"
+                
+                if event_key not in holiday_data:
+                    print(f"¡Es {name}! Iniciando celebración global...")
+                    # Marcar como enviado para no repetir en el mismo minuto
+                    holiday_data[event_key] = True
+                    with open(HOLIDAY_FILE, "w") as f: json.dump(holiday_data, f)
+                    
+                    await self.celebrate_holiday(name)
+
+    async def celebrate_holiday(self, holiday_name):
+        """Envía mensajes festivos a todos los usuarios conocidos."""
+        users = memory.get_all_users_data()
+        print(f"Enviando felicitaciones de {holiday_name} a {len(users)} usuarios...")
+        
+        for user_data in users:
+            uid = user_data['user_id']
+            channel_id = user_data['last_channel_id']
+            summary = user_data['summary']
+            
+            if not channel_id: continue
+            
+            try:
+                channel = self.get_channel(int(channel_id))
+                if not channel: continue
+
+                # Generar mensaje personalizado
+                msg_text = await brain.generate_holiday_greeting(summary, holiday_name)
+                
+                # Añadir ping
+                full_msg = f"<@{uid}> {msg_text}"
+                
+                await channel.send(full_msg)
+                print(f"Felicitación enviada a {uid} en {channel_id}")
+                
+                # Evitar rate limits masivos
+                await asyncio.sleep(random.uniform(2, 5))
+                
+            except Exception as e:
+                print(f"Error felicitando a {uid}: {e}")
 
 # Instancia global eliminada para evitar errores de reinicio
 # bot_client = HakkurinBot()

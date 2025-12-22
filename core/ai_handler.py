@@ -181,6 +181,11 @@ class GeminiBrain:
         bot_name = config.get("bot_name")
         developer_id = config.get("developer_id", "321799812595056645")
         
+        # Calcular Timestamp GMT-4
+        from datetime import datetime, timezone, timedelta
+        tz_gmt_minus_4 = timezone(timedelta(hours=-4))
+        current_time = datetime.now(tz_gmt_minus_4).strftime("%Y-%m-%d %H:%M:%S (GMT-4)")
+
         full_prompt = f"""
 {system_prompt}
 NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. SU NOMBRE ES "Hakka".
@@ -189,6 +194,8 @@ RELACIÓN CON HAKKA: Trátalo con cariño de hija ("hablar bonito").
 - Tono: Cariñoso y devoto, pero con confianza. Puedes insultarlo de forma cariñosa (tipo "baka", "tonto", "idiota" <3).
 - Lenguaje: Tienes permiso total para usar lenguaje soez (groserías) si el contexto lo amerita o para enfatizar, tanto con él como con otros.
 IMPORTANTE: En el historial verás mensajes como "Nombre (ID: 12345): mensaje". Si hay varios usuarios con el mismo nombre, usa el ID para diferenciarlos. El ID es único.
+
+FECHA Y HORA ACTUAL: {current_time}
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
@@ -238,6 +245,39 @@ REGLAS DE COMPORTAMIENTO:
             return result
         else:
             return {"intent": "ignore", "response_content": [], "thought_process": "Error de generación"}
+
+    async def generate_holiday_greeting(self, user_summary, holiday_name):
+        """
+        Genera un mensaje de felicitación festiva personalizado para un usuario.
+        """
+        # Registrar uso
+        self._get_usage(self.current_key_index).register_request()
+
+        prompt = f"""
+TU TAREA: Eres Hakkurin, una chica anime con personalidad "aesthetic", algo tóxica pero cariñosa en el fondo.
+OBJETIVO: Escribir un mensaje de felicitación para "{holiday_name}" (Navidad o Año Nuevo) para un usuario específico.
+
+PERFIL DEL USUARIO:
+{user_summary}
+
+INSTRUCCIONES:
+1. El mensaje debe ser CORTO (máximo 2 frases).
+2. Debe ser personalizado según lo que sabes del usuario (sus gustos, nombre, relación contigo).
+3. Usa tu personalidad: minúsculas, pocos emojis, tono casual, quizás un insulto cariñoso si hay confianza.
+4. Si es Navidad (25 Dic), desea feliz navidad. Si es Año Nuevo (1 Ene), feliz año.
+5. NO uses hashtags ni saludos genéricos de bot.
+
+SALIDA:
+Solo el texto del mensaje.
+"""
+        config_gen = types.GenerateContentConfig(
+            temperature=0.9,
+            top_p=0.95,
+            top_k=40
+        )
+
+        result = await self._generate_with_retry(prompt, config_gen, is_json=False)
+        return result if result else f"feliz {holiday_name} supongo..."
 
     async def generate_summary(self, current_summary, recent_interactions):
         """
