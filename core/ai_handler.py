@@ -217,20 +217,31 @@ class GeminiBrain:
             if summary.strip():
                 profiles_text += f"--- PERFIL DE USUARIO ID {uid} ---\n{summary}\n"
 
-        # Gestión de Tokens (Límite ~240k tokens -> ~900k caracteres)
-        # Si el historial es muy largo, cortamos los mensajes más antiguos
-        MAX_CHARS = 900000
+        # Gestión de Tokens (Límite 240k tokens ~ 960,000 caracteres)
+        # Prioridad: System Prompt > Perfiles > Mensaje Actual > Historial Reciente
+        MAX_TOTAL_CHARS = 960000
+        
+        # Estimar tamaño de partes fijas
+        fixed_content = f"{system_prompt}\n{current_time}\n{bot_age_str}\n{profiles_text}\nUsuario: {user_name}\n{user_text}"
+        fixed_size = len(fixed_content)
+        
+        available_for_history = MAX_TOTAL_CHARS - fixed_size - 5000 # 5000 chars de buffer de seguridad
+        
         history_text = chr(10).join(context_messages)
         
-        if len(history_text) > MAX_CHARS:
-            # Cortar aproximadamente
-            excess = len(history_text) - MAX_CHARS
-            history_text = history_text[excess:]
-            # Ajustar al primer salto de línea para no cortar mensaje a la mitad
-            first_newline = history_text.find('\n')
-            if first_newline != -1:
-                history_text = history_text[first_newline+1:]
-            print(f"Historial truncado por límite de tokens. Longitud actual: {len(history_text)}")
+        if len(history_text) > available_for_history:
+            if available_for_history <= 0:
+                history_text = "" # No hay espacio para historial
+                print("ADVERTENCIA: Prompt fijo excede límite de tokens. Historial eliminado.")
+            else:
+                # Cortar lo más antiguo
+                excess = len(history_text) - available_for_history
+                history_text = history_text[excess:]
+                # Ajustar al primer salto de línea
+                first_newline = history_text.find('\n')
+                if first_newline != -1:
+                    history_text = history_text[first_newline+1:]
+                print(f"Historial truncado para ajustar a límite de tokens. Nuevo tamaño: {len(history_text)}")
 
         text_prompt = f"""
 {system_prompt}

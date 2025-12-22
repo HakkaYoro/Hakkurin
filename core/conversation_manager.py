@@ -29,8 +29,8 @@ class Session:
         self._cleanup_context(now)
 
     def _cleanup_context(self, now):
-        # Mantener solo mensajes de las últimas 24 horas (86400 segundos)
-        cutoff = now - 86400
+        # Mantener solo mensajes de la última 1 hora (3600 segundos)
+        cutoff = now - 3600
         self.context_messages = [msg for msg in self.context_messages if msg['timestamp'] > cutoff]
 
     def get_context_text(self):
@@ -56,8 +56,8 @@ class ChannelContext:
         return (time.time() - self.last_bot_activity) < timeout
 
     def _cleanup(self, now):
-        # Mantener últimos 50 mensajes o 24 horas
-        cutoff = now - 86400
+        # Mantener últimos 50 mensajes o 1 hora
+        cutoff = now - 3600
         self.messages = [msg for msg in self.messages if msg['timestamp'] > cutoff][-50:]
 
     def get_formatted_history(self):
