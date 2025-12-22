@@ -191,15 +191,15 @@ REGLAS DE COMPORTAMIENTO:
             
             try:
                 if self.client:
-                        response = self.client.models.generate_content(
+                    response = self.client.models.generate_content(
                         model=fallback_model,
                         contents=full_prompt,
                         config=types.GenerateContentConfig(response_mime_type="application/json")
                     )
-                        text_response = response.text.strip()
-                        if text_response.startswith("```"):
+                    text_response = response.text.strip()
+                    if text_response.startswith("```"):
                         text_response = text_response.strip("`").replace("json\n", "").strip()
-                        return json.loads(text_response)
+                    return json.loads(text_response)
             except Exception as e2:
                 return {"intent": "error", "response_content": [f"Error crítico de IA ({fallback_model}): {e2}"]}
             
