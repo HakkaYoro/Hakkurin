@@ -129,7 +129,7 @@ class GeminiBrain:
         import asyncio
         
         PRIMARY_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
-        FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemma-3-27b-it"]
+        FALLBACK_MODELS = ["gemma-3-27b-it"]
         
         # Determinar orden de modelos
         now = time.time()
