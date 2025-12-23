@@ -470,7 +470,7 @@ INSTRUCCIONES CRÍTICAS:
 3. Sé explícita, detallada y técnica sobre tu propio estado y compromisos.
 4. NO USES EMOJIS en ninguna parte del reporte.
 5. Si detectas un compromiso con FECHA Y HORA específica, DEBES incluirlo en la sección JSON final.
-6. IMPORTANTE: NO incluyas en el JSON acciones que ya aparecen como "EJECUTADAS" o "COMPLETADAS" en tus acciones recientes. Si ya lo hiciste, bórralo de la lista.
+6. 🛑 FILTRO CRÍTICO: Revisa las "NUEVAS INTERACCIONES". Si ves un mensaje que dice "EJECUTÉ RECORDATORIO: [X]", ENTONCES [X] YA ESTÁ HECHO. ¡NO LO INCLUYAS EN EL JSON! Elimínalo de tu lista de pendientes.
 
 FORMATO DE SALIDA (Markdown + JSON):
 
