@@ -133,6 +133,7 @@ class ConversationManager:
         Args:
             bot_send_message_callback: Función async (channel_id, text) para enviar mensajes.
         """
+        import random
         now = time.time()
         keys_to_remove = []
 
@@ -143,34 +144,40 @@ class ConversationManager:
             if now - session.last_interaction > SESSION_TIMEOUT:
                 print(f"Sesión expirada para {key}")
                 
-                # Oportunidad para que la IA se queje o se despida
-                # Recuperamos memoria para contexto
-                mem_summary = memory.get_memory_summary(session.user_id)
-                channel_history = self.get_channel_context(session.channel_id).get_formatted_history()
-                
-                # Pedimos a la IA una reacción de "cierre por timeout"
-                fake_msg = "[SISTEMA]: El usuario ha dejado de responder por 5 minutos. ¿Quieres decir algo antes de irte? (Si no, responde con intent: ignore)"
-                
-                try:
-                    analysis = await brain.analyze_interaction(
-                        user_text=fake_msg,
-                        user_id=session.user_id,
-                        user_name="System",
-                        context_messages=channel_history,
-                        is_session_active=True
-                    )
+                # Probabilidad de 1/8 (12.5%) de reaccionar
+                if random.random() > 0.125:
+                    print(f"  -> Timeout silencioso (Probabilidad 7/8).")
+                else:
+                    # Oportunidad para que la IA se queje o se despida
+                    # Recuperamos memoria para contexto
+                    mem_summary = memory.get_memory_summary(session.user_id)
+                    channel_history = self.get_channel_context(session.channel_id).get_formatted_history()
                     
-                    response_content = analysis.get("response_content", [])
-                    # Normalizar a lista si es string
-                    if isinstance(response_content, str):
-                         response_content = [response_content]
+                    # Pedimos a la IA una reacción de "cierre por timeout"
+                    fake_msg = "[SISTEMA]: El usuario ha dejado de responder por 5 minutos. ¿Quieres decir algo antes de irte? (Si no, responde con intent: ignore) (Máximo 2 mensajes cortos)"
                     
-                    if analysis.get("intent") in ["complain", "reply", "new_topic"] and response_content:
-                        for msg_text in response_content:
-                            if isinstance(msg_text, str):
-                                await bot_send_message_callback(session.channel_id, msg_text)
-                except Exception as e:
-                    print(f"Error en timeout check: {e}")
+                    try:
+                        analysis = await brain.analyze_interaction(
+                            user_text=fake_msg,
+                            user_id=session.user_id,
+                            user_name="System",
+                            context_messages=channel_history,
+                            is_session_active=True
+                        )
+                        
+                        response_content = analysis.get("response_content", [])
+                        # Normalizar a lista si es string
+                        if isinstance(response_content, str):
+                             response_content = [response_content]
+                        
+                        if analysis.get("intent") in ["complain", "reply", "new_topic"] and response_content:
+                            # LIMITAR SPAM: Máximo 2 mensajes
+                            for i, msg_text in enumerate(response_content):
+                                if i >= 2: break 
+                                if isinstance(msg_text, str):
+                                    await bot_send_message_callback(session.channel_id, msg_text)
+                    except Exception as e:
+                        print(f"Error en timeout check: {e}")
 
                 keys_to_remove.append(key)
 

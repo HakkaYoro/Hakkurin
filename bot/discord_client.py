@@ -336,6 +336,14 @@ class HakkurinBot(discord.Client):
             channel_ctx = conversation_manager.get_channel_context(message.channel.id)
             channel_ctx.add_message(config.get('bot_name'), str(self.user.id), full_response_text.strip())
             channel_ctx.update_bot_activity() # Marcar que el bot está activo en este canal
+
+            # --- SELF MEMORY LOGGING ---
+            # Registrar lo que el bot acaba de decir en su propia memoria
+            should_summarize_self = memory.log_self_action(full_response_text.strip())
+            
+            if should_summarize_self:
+                print("Trigger de resumen de AUTO-MEMORIA activado.")
+                asyncio.create_task(self.perform_memory_summarization(memory.BOT_SELF_ID))
             
             # Guardar último canal conocido para festividades
             memory.update_last_channel(user_id, message.channel.id)

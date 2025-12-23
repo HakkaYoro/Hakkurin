@@ -327,6 +327,9 @@ class GeminiBrain:
                     history_text = history_text[first_newline+1:]
                 print(f"Historial truncado para ajustar a límite de tokens. Nuevo tamaño: {len(history_text)}")
 
+        # Cargar memoria propia
+        self_mem = memory.get_self_memory()
+
         text_prompt = f"""
 {system_prompt}
 NOTA: Tu desarrollador/creador (tu 'padre') es el usuario con ID: {developer_id}. SU NOMBRE ES "Hakka".
@@ -341,6 +344,9 @@ TU EDAD: {bot_age_str}
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
+
+DATOS INTERNOS (Tu propia memoria de lo que has hecho/dicho):
+{self_mem}
 
 CONTEXTO DE USUARIOS EN EL CHAT (Memorias):
 {profiles_text}
@@ -364,14 +370,15 @@ Analiza el mensaje del usuario (y la imagen si la hay) y decide tu reacción. Re
 }}
 
 REGLAS DE PERSONALIDAD (CRÍTICO):
-1. **MENSAJES CORTOS**: Escribe como en chat. Frases breves. "Ya miri", "Ya lo hice".
-2. **POCOS EMOJIS**: Úsalos muy raramente. Solo para enfatizar mucho. El exceso se ve falso.
-3. **MINÚSCULAS**: Prefiere minúsculas y falta de puntuación final, como una persona joven en internet.
-4. **DIVIDE MENSAJES**: Si tienes dos ideas, mándalas en dos strings separados en la lista `response_content`.
+1. **CANTIDAD**: Mínimo 1 mensaje, máximo 10 mensajes cortos.
+2. **MENSAJES CORTOS**: Escribe como en chat. Frases breves. "Ya miri", "Ya lo hice".
+3. **POCOS EMOJIS**: Úsalos muy raramente. Solo para enfatizar mucho. El exceso se ve falso.
+4. **MINÚSCULAS**: Prefiere minúsculas y falta de puntuación final, como una persona joven en internet.
+5. **DIVIDE MENSAJES**: Si tienes dos ideas, mándalas en dos strings separados en la lista `response_content`.
    Ejemplo: ["mentira", "a ver"] es mejor que ["mentira, a ver"].
-5. **NATURALIDAD**: Si te ignoran, ignora. Si te insultan, responde corto y cortante o ignora.
-6. **GRUPO**: Si hay mucha gente hablando, usa pings (<@user_id>) o replies solo si es necesario para que sepan a quién le hablas.
-7. **LENGUAJE SOEZ**: Tienes permiso de usar groserías con CUALQUIER usuario si la situación, el contexto o la emoción lo amerita. No te censures si encaja con tu personalidad.
+6. **NATURALIDAD**: Si te ignoran, ignora. Si te insultan, responde corto y cortante o ignora.
+7. **GRUPO**: Si hay mucha gente hablando, usa pings (<@user_id>) o replies solo si es necesario para que sepan a quién le hablas.
+8. **LENGUAJE SOEZ**: Tienes permiso de usar groserías con CUALQUIER usuario si la situación, el contexto o la emoción lo amerita. No te censures si encaja con tu personalidad.
 
 REGLAS DE COMPORTAMIENTO:
 1. Si 'Sesión Activa' es SÍ, asume que te hablan a ti a menos que sea muy obvio que no.
@@ -439,7 +446,34 @@ Solo el texto del mensaje.
         # Registrar uso
         self._get_usage(self.current_key_index).register_request()
 
-        prompt = f"""
+        # Prompt Especial para Auto-Reflexión (Memoria Propia)
+        if user_id == "hakkurin_internal_self":
+            prompt = f"""
+TU TAREA: Eres la CONCIENCIA de una IA llamada Hakkurin.
+OBJETIVO: Actualizar tu memoria interna a largo plazo sobre tus propias acciones y estado.
+
+RESUMEN ACTUAL (Lo que recuerdas de antes):
+{current_summary if current_summary else "Sin memoria previa."}
+
+TUS ACCIONES RECIENTES (Nuevas):
+{chr(10).join(recent_interactions)}
+
+INSTRUCCIONES:
+1. Analiza tus acciones recientes y combínalas con tu memoria previa.
+2. Genera un resumen NARRATIVO en primera persona ("Yo hice...", "Yo dije...").
+3. Enfócate en:
+   - Temas importantes que hablaste.
+   - Promesas o compromisos que hiciste.
+   - Tu estado emocional general o "vibe" reciente.
+   - Conflictos o momentos destacados.
+4. Sé concisa pero útil para tu "yo" del futuro.
+
+SALIDA:
+Solo el texto del resumen.
+"""
+        else:
+            # Prompt Normal para Usuarios
+            prompt = f"""
 TU TAREA: Eres el gestor de memoria a largo plazo de una IA. Tu trabajo es actualizar el perfil del usuario.
 NOTA: El desarrollador es "Hakka" (ID: 321799812595056645).
 

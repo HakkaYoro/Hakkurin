@@ -117,6 +117,20 @@ class MemoryManager:
                     users.append(user_id)
         return users
 
+    # --- SELF MEMORY ---
+    BOT_SELF_ID = "hakkurin_internal_self"
+
+    def get_self_memory(self):
+        """Devuelve el resumen de la memoria interna del bot."""
+        mem = self.get_memory(self.BOT_SELF_ID)
+        return mem.get("summary", "Sin memoria interna previa.")
+
+    def log_self_action(self, action_text):
+        """Registra una acción propia del bot en su memoria."""
+        # Usamos el mismo mecanismo que para usuarios, pero con el ID especial
+        # Esto disparará resúmenes periódicos de "qué he hecho hoy"
+        return self.add_interaction(self.BOT_SELF_ID, f"[YO DIJE/HICE]: {action_text}")
+
     def get_buffer_and_summary(self, user_id):
         mem = self.get_memory(user_id)
         return mem.get("summary", ""), mem.get("history_buffer", [])

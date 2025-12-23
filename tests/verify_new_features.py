@@ -258,5 +258,47 @@ class TestNewFeatures(unittest.IsolatedAsyncioTestCase):
         # Restaurar
         brain._generate_with_retry = original_generate
 
+    def test_timeout_probability(self):
+        print("\n--- Test: Probabilidad de Timeout y Anti-Spam ---")
+        from core.conversation_manager import conversation_manager, Session
+        
+        # Setup sesión expirada
+        channel_id = 123
+        user_id = "user_timeout"
+        conversation_manager.sessions[(channel_id, user_id)] = Session(channel_id, user_id)
+        conversation_manager.sessions[(channel_id, user_id)].is_active = True
+        conversation_manager.sessions[(channel_id, user_id)].last_interaction = time.time() - 301 # > 5 min
+        
+        # Mock callback
+        mock_send = AsyncMock()
+        
+        # Caso 1: Timeout Silencioso (Random > 0.125)
+        with patch('random.random', return_value=0.5):
+            asyncio.run(conversation_manager.check_timeouts(mock_send))
+            mock_send.assert_not_called()
+            print("✅ Timeout silencioso funcionó (no envió mensaje).")
+            
+        # Caso 2: Timeout Activo (Random <= 0.125) + Anti-Spam
+        # Restaurar sesión
+        conversation_manager.sessions[(channel_id, user_id)] = Session(channel_id, user_id)
+        conversation_manager.sessions[(channel_id, user_id)].is_active = True
+        conversation_manager.sessions[(channel_id, user_id)].last_interaction = time.time() - 301
+        
+        # Mockear brain para devolver 5 mensajes (spam)
+        from core.ai_handler import brain
+        original_analyze = brain.analyze_interaction
+        brain.analyze_interaction = AsyncMock(return_value={
+            "intent": "complain",
+            "response_content": ["Msg 1", "Msg 2", "Msg 3", "Msg 4", "Msg 5"]
+        })
+        
+        with patch('random.random', return_value=0.1):
+            asyncio.run(conversation_manager.check_timeouts(mock_send))
+            self.assertEqual(mock_send.call_count, 2)
+            print("✅ Anti-Spam funcionó (limitó a 2 mensajes).")
+            
+        # Restaurar
+        brain.analyze_interaction = original_analyze
+
 if __name__ == '__main__':
     unittest.main()
