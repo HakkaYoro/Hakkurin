@@ -1,3 +1,11 @@
+import discord
+import random
+import asyncio
+from discord.ext import tasks
+from core.config_manager import config
+from core.ai_handler import brain
+from core.memory_manager import memory
+from core.conversation_manager import conversation_manager
 from core.scheduler import scheduler
 
 class HakkurinBot(discord.Client):
