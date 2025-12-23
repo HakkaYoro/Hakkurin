@@ -448,28 +448,66 @@ Solo el texto del mensaje.
 
         # Prompt Especial para Auto-Reflexión (Memoria Propia)
         if user_id == "hakkurin_internal_self":
+            from datetime import datetime
+            current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            
             prompt = f"""
-TU TAREA: Eres la CONCIENCIA de una IA llamada Hakkurin.
-OBJETIVO: Actualizar tu memoria interna a largo plazo sobre tus propias acciones y estado.
+TU TAREA: Eres el SISTEMA DE CONCIENCIA Y MEMORIA de una IA llamada Hakkurin.
+OBJETIVO: Generar un archivo de memoria estructurado, detallado y útil para tu "yo" del futuro.
 
-RESUMEN ACTUAL (Lo que recuerdas de antes):
-{current_summary if current_summary else "Sin memoria previa."}
+TIEMPO ACTUAL: {current_time_str}
 
-TUS ACCIONES RECIENTES (Nuevas):
+ENTRADA:
+--- MEMORIA PREVIA ---
+{current_summary if current_summary else "Sin memoria previa (Tabula Rasa)."}
+
+--- NUEVAS INTERACCIONES (Lo que acaba de pasar) ---
 {chr(10).join(recent_interactions)}
 
-INSTRUCCIONES:
-1. Analiza tus acciones recientes y combínalas con tu memoria previa.
-2. Genera un resumen NARRATIVO en primera persona ("Yo hice...", "Yo dije...").
-3. Enfócate en:
-   - Temas importantes que hablaste.
-   - Promesas o compromisos que hiciste.
-   - Tu estado emocional general o "vibe" reciente.
-   - Conflictos o momentos destacados.
-4. Sé concisa pero útil para tu "yo" del futuro.
+INSTRUCCIONES CRÍTICAS:
+1. Analiza profundamente las nuevas interacciones en contexto con la memoria previa.
+2. NO hagas un resumen narrativo simple. Estructura la información para máxima utilidad.
+3. Sé explícita, detallada y técnica sobre tu propio estado y compromisos.
+4. NO USES EMOJIS en ninguna parte del reporte.
+5. Si detectas un compromiso con FECHA Y HORA específica, DEBES incluirlo en la sección JSON final.
+
+FORMATO DE SALIDA (Markdown + JSON):
+
+### ESTADO ACTUAL
+*   **Vibe/Emoción**: [Describe tu actitud actual]
+*   **Nivel de Energía**: [Bajo/Medio/Alto]
+*   **Foco de Atención**: [En qué estás pensando principalmente]
+
+### CONTEXTO ACTIVO
+*   [Lista de temas activos o conversaciones en curso]
+*   [Contexto relevante del servidor o situación]
+
+### EVENTOS CLAVE
+*   [Hecho importante 1]
+*   [Hecho importante 2]
+
+### COMPROMISOS Y PROMESAS
+*   [Cosas que dijiste que harías]
+*   [Recordatorios para el usuario]
+
+### REFLEXIÓN INTERNA
+[Un párrafo breve de síntesis]
+
+### SCHEDULED_ACTIONS (JSON)
+```json
+[
+  {{
+    "trigger_time": "YYYY-MM-DD HH:MM",
+    "action_description": "Descripción exacta de lo que debes hacer",
+    "target_user_id": "ID de Discord del usuario (Si aplica, solo números)",
+    "target_user_name": "Nombre del usuario (Opcional)"
+  }}
+]
+```
+(Si no hay acciones programadas, devuelve una lista vacía `[]`)
 
 SALIDA:
-Solo el texto del resumen.
+Solo el contenido en el formato solicitado.
 """
         else:
             # Prompt Normal para Usuarios

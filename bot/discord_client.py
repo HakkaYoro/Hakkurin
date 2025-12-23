@@ -1,11 +1,4 @@
-import discord
-import random
-import asyncio
-from discord.ext import tasks
-from core.config_manager import config
-from core.ai_handler import brain
-from core.memory_manager import memory
-from core.conversation_manager import conversation_manager
+from core.scheduler import scheduler
 
 class HakkurinBot(discord.Client):
     def __init__(self):
@@ -22,6 +15,9 @@ class HakkurinBot(discord.Client):
         self.sleep_until = 0
         self.last_active_channel_id = None
         self._load_status_messages()
+        
+        # Cache para evitar repetir acciones muy seguido
+        self.executed_actions_cache = set()
 
     async def setup_hook(self):
         # Iniciar tarea de fondo para timeouts
@@ -32,6 +28,86 @@ class HakkurinBot(discord.Client):
         self.process_memory_queue_task.start()
         # Iniciar tarea de recuperación de sueño
         self.recovery_check_task.start()
+        # Iniciar tarea de recordatorios
+        self.check_reminders_task.start()
+
+    @tasks.loop(minutes=1)
+    async def check_reminders_task(self):
+        """Revisa si hay acciones programadas en la memoria interna."""
+        try:
+            # 1. Leer memoria interna
+            self_memory_text = memory.get_self_memory()
+            if not self_memory_text:
+                return
+
+            # 2. Parsear acciones
+            actions = scheduler.parse_scheduled_actions(self_memory_text)
+            
+            # 3. Filtrar las que tocan ahora
+            due_actions = scheduler.check_due_actions(actions)
+            
+            for action in due_actions:
+                action_desc = action.get("action_description")
+                trigger_time = action.get("trigger_time")
+                target_user_id = action.get("target_user_id")
+                unique_key = f"{trigger_time}:{action_desc}"
+                
+                # Evitar duplicados recientes
+                if unique_key in self.executed_actions_cache:
+                    continue
+                
+                print(f"[SCHEDULER] Ejecutando acción: {action_desc}")
+                self.executed_actions_cache.add(unique_key)
+                
+                # Determinar canal (último conocido o default)
+                channel_id = self.last_active_channel_id
+                if not channel_id:
+                    # Intentar buscar en memoria de usuarios
+                    users = memory.get_all_users_data()
+                    if users:
+                        channel_id = users[0].get('last_channel_id')
+                
+                if channel_id:
+                    channel = self.get_channel(int(channel_id))
+                    if channel:
+                        # Preparar contexto para la IA
+                        user_context_id = "hakkurin_internal_self"
+                        user_name = "Sistema"
+                        ping_str = ""
+                        
+                        # Si hay un usuario objetivo, usar SU memoria para personalizar el mensaje
+                        if target_user_id and str(target_user_id).isdigit():
+                            user_context_id = str(target_user_id)
+                            ping_str = f"<@{target_user_id}>"
+                            # Intentar obtener nombre
+                            try:
+                                user_obj = await self.fetch_user(int(target_user_id))
+                                if user_obj:
+                                    user_name = user_obj.name
+                            except:
+                                user_name = "Usuario"
+
+                        # Generar respuesta con IA usando la memoria del usuario (si existe)
+                        prompt = f"""
+[SISTEMA]: EJECUCIÓN DE RECORDATORIO AUTOMÁTICO.
+ACCIÓN: {action_desc}
+INSTRUCCIÓN: Genera el mensaje para cumplir este compromiso ahora mismo.
+NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con él para ser personal y natural.
+"""
+                        # Usamos user_context_id para que cargue la memoria de ESE usuario
+                        response = await brain.generate_response(prompt, user_context_id, user_name)
+                        
+                        await channel.send(response)
+                        
+                        # Registrar en memoria que lo hicimos
+                        memory.log_self_action(f"EJECUTÉ RECORDATORIO: {action_desc} para {user_name}")
+                        
+        except Exception as e:
+            print(f"Error en check_reminders_task: {e}")
+
+    @check_reminders_task.before_loop
+    async def before_reminders(self):
+        await self.wait_until_ready()
 
     async def on_ready(self):
         print(f'Conectado como {self.user} (ID: {self.user.id})')
