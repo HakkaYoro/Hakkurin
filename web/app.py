@@ -56,19 +56,35 @@ async def update_config(
 
     return RedirectResponse(url="/?saved=true", status_code=303)
 
+from core.memory_manager import memory
+
 @app.get("/memories", response_class=HTMLResponse)
 async def list_memories(request: Request):
-    summary_dir = "data/memory/summaries"
+    # Usar el directorio real de memorias encriptadas
+    memory_dir = "data/memory/users"
     memories = []
-    if os.path.exists(summary_dir):
-        for filename in os.listdir(summary_dir):
-            if filename.endswith(".txt"):
-                user_id = filename.replace(".txt", "")
-                # Intentar obtener fecha de modificación
-                mod_time = os.path.getmtime(os.path.join(summary_dir, filename))
+    
+    if os.path.exists(memory_dir):
+        for filename in os.listdir(memory_dir):
+            if filename.endswith(".enc"):
+                user_id = filename.replace(".enc", "")
+                
+                # Obtener fecha de modificación del archivo
+                file_path = os.path.join(memory_dir, filename)
+                mod_time = os.path.getmtime(file_path)
                 from datetime import datetime
                 date_str = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
-                memories.append({"user_id": user_id, "date": date_str})
+                
+                mem_data = {"user_id": user_id, "date": date_str}
+                
+                # Marcar si es la memoria interna
+                if user_id == memory.BOT_SELF_ID:
+                    mem_data["is_self"] = True
+                    
+                memories.append(mem_data)
+    
+    # Ordenar por fecha reciente
+    memories.sort(key=lambda x: x["date"], reverse=True)
     
     return templates.TemplateResponse("memories.html", {
         "request": request,
@@ -77,11 +93,15 @@ async def list_memories(request: Request):
 
 @app.get("/memories/{user_id}", response_class=HTMLResponse)
 async def view_memory(request: Request, user_id: str):
-    file_path = f"data/memory/summaries/{user_id}.txt"
-    content = "No se encontró memoria para este usuario."
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
+    # Usar MemoryManager para desencriptar
+    try:
+        if user_id == memory.BOT_SELF_ID:
+            content = memory.get_self_memory()
+        else:
+            summary = memory.get_memory_summary(user_id)
+            content = summary if summary else "Sin resumen generado aún."
+    except Exception as e:
+        content = f"Error leyendo memoria: {str(e)}"
             
     return templates.TemplateResponse("memory_view.html", {
         "request": request,
