@@ -205,7 +205,7 @@ class GeminiBrain:
                         config=current_config
                     )
                     
-                    text_response = response.text.strip()
+                    text_response = (response.text or "").strip()
                     
                     # Si tuvimos éxito con un modelo de fallback y NO estábamos forzados, activar modo fallback
                     if model_name in FALLBACK_MODELS and not use_fallback:
