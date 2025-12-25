@@ -207,6 +207,14 @@ class GeminiBrain:
                     
                     text_response = (response.text or "").strip()
                     
+                    if not text_response:
+                        print(f"⚠️ RESPUESTA VACÍA con {model_name}.")
+                        try:
+                            print(f"  - Finish Reason: {response.candidates[0].finish_reason}")
+                            print(f"  - Safety Ratings: {response.candidates[0].safety_ratings}")
+                        except:
+                            print(f"  - No se pudo leer finish_reason/safety_ratings. Raw: {response}")
+                    
                     # Si tuvimos éxito con un modelo de fallback y NO estábamos forzados, activar modo fallback
                     if model_name in FALLBACK_MODELS and not use_fallback:
                         print("Primarios fallaron, activando Modo Fallback por 40 minutos.")
