@@ -163,7 +163,7 @@ class GeminiBrain:
         # User Content
         user_content = []
         if image_data:
-            model = "glm-4v" # Usar modelo de visión (Mantener 4v para imágenes)
+            model = "glm-4.6v" # Usar modelo de visión específico (glm-4.6v)
             base64_image = base64.b64encode(image_data).decode('utf-8')
             user_content.append({
                 "type": "text",
@@ -184,16 +184,24 @@ class GeminiBrain:
         try:
             print(f"🤖 Intentando generar con ZhipuAI ({model}) [OpenAI SDK]...")
             
+            # Preparar argumentos para la llamada
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.7,
+                "top_p": 0.7,
+                "max_tokens": 1024,
+                "stream": False
+            }
+            
+            # Solo GLM-4.7 soporta el parámetro de thinking (razonamiento)
+            if model == "glm-4.7":
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
             # Ejecutar en thread aparte para no bloquear
             response = await asyncio.to_thread(
                 self.zhipu_client.chat.completions.create,
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                top_p=0.7,
-                max_tokens=1024,
-                stream=False,
-                extra_body={"thinking": {"type": "disabled"}} # Desactivar razonamiento nativo de Zhipu
+                **kwargs
             )
             
             content = response.choices[0].message.content
@@ -400,9 +408,9 @@ class GeminiBrain:
             if summary.strip():
                 profiles_text += f"--- PERFIL DE USUARIO ID {uid} ---\n{summary}\n"
 
-        # Gestión de Tokens (Límite 240k tokens ~ 960,000 caracteres)
+        # Gestión de Tokens (Límite 200k tokens ~ 800,000 caracteres para GLM-4.7)
         # Prioridad: System Prompt > Perfiles > Mensaje Actual > Historial Reciente
-        MAX_TOTAL_CHARS = 960000
+        MAX_TOTAL_CHARS = 800000
         
         # Estimar tamaño de partes fijas
         fixed_content = f"{system_prompt}\n{current_time}\n{bot_age_str}\n{profiles_text}\nUsuario: {user_name}\n{user_text}"
