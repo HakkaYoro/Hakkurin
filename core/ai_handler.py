@@ -145,7 +145,50 @@ class GeminiBrain:
     def _update_gemma_usage(self, tokens):
         self.gemma_tokens_this_minute += tokens
 
-    async def _generate_with_zhipu(self, system_prompt, user_prompt, is_json=False, image_data=None):
+    def _search_ddg(self, query):
+        """Ejecuta una búsqueda web usando DuckDuckGo (Gratis)."""
+        from ddgs import DDGS
+        
+        # Limpieza proactiva de la query: quitar año para evitar resultados demasiado específicos/vacíos
+        original_query = query
+        if "2025" in query:
+            query = query.replace("2025", "").strip()
+        
+        try:
+            print(f"🔎 Buscando en DuckDuckGo: '{query}'...")
+            results = []
+            with DDGS() as ddgs:
+                # Buscar texto (limitado a 5 resultados para rapidez, región Venezuela para relevancia)
+                ddg_gen = ddgs.text(query, region='ve-es', max_results=5)
+                if ddg_gen:
+                    for r in ddg_gen:
+                        title = r.get("title", "Sin título")
+                        link = r.get("href", "#")
+                        snippet = r.get("body", "")
+                        results.append(f"- [{title}]({link}): {snippet}")
+            
+            # Fallback: Si hay pocos resultados (< 2), intentar con una query más corta (primeras 4 palabras)
+            # Esto ayuda cuando la query original era muy larga o específica
+            if len(results) < 2 and len(query.split()) > 4:
+                simple_query = " ".join(query.split()[:4])
+                print(f"⚠️ Pocos resultados. Reintentando con query corta: '{simple_query}'...")
+                
+                with DDGS() as ddgs:
+                    ddg_gen = ddgs.text(simple_query, region='ve-es', max_results=5)
+                    if ddg_gen:
+                        for r in ddg_gen:
+                            title = r.get("title", "Sin título")
+                            link = r.get("href", "#")
+                            snippet = r.get("body", "")
+                            results.append(f"- [{title}]({link}): {snippet}")
+
+            # print(f"DEBUG DDG: Encontrados {len(results)} resultados.")
+            return "\n".join(results) if results else "No se encontraron resultados."
+        except Exception as e:
+            print(f"❌ Excepción en búsqueda DDG: {e}")
+            return f"Error al buscar: {e}"
+
+    async def _generate_with_zhipu(self, system_prompt, user_prompt, is_json=False, image_data=None, enable_search=False):
         """Genera respuesta usando ZhipuAI (GLM-4.7) vía OpenAI SDK."""
         if not self.zhipu_client:
             return None
@@ -158,6 +201,16 @@ class GeminiBrain:
         
         # System Prompt
         if system_prompt:
+             if enable_search:
+                 system_prompt += (
+                     "\n\n### [HERRAMIENTA: WEB_SEARCH]\n"
+                     "Tienes acceso a internet mediante la función `web_search(query)`. "
+                     "Úsala de forma inteligente y dinámica siguiendo estas reglas:\n"
+                     "1. **Cuándo usarla**: Úsala para obtener datos en tiempo real (precios, noticias, clima), verificar hechos específicos que no conoces, o buscar información reciente que no está en tu base de conocimientos.\n"
+                     "2. **Cuándo NO usarla**: No la uses para conversaciones casuales, saludos, opiniones personales o temas que ya conoces perfectamente.\n"
+                     "3. **Consultas efectivas**: Genera consultas de búsqueda cortas y directas en español (ej: 'precio dolar venezuela hoy', 'clima en caracas'). Evita incluir fechas exactas o palabras innecesarias a menos que sea estrictamente necesario.\n"
+                     "4. **Integración**: Una vez recibas los resultados, intégralos de forma natural en tu respuesta manteniendo tu personalidad. Si la búsqueda falla o no hay resultados, admítelo honestamente sin inventar datos."
+                 )
              messages.append({"role": "system", "content": system_prompt})
         
         # User Content
@@ -181,10 +234,31 @@ class GeminiBrain:
 
         messages.append({"role": "user", "content": user_content})
 
+        # Definición de herramientas (Standard OpenAI Format)
+        tools = []
+        if enable_search:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Busca información en internet. Úsalo para noticias, precios, clima o datos recientes.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "La consulta de búsqueda optimizada para un buscador."
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            })
+
         try:
-            print(f"🤖 Intentando generar con ZhipuAI ({model}) [OpenAI SDK]...")
+            print(f"🤖 Intentando generar con ZhipuAI ({model}) [OpenAI SDK + Manual RAG]...")
             
-            # Preparar argumentos para la llamada
+            # Primera llamada: Ver si quiere usar herramientas
             kwargs = {
                 "model": model,
                 "messages": messages,
@@ -194,17 +268,61 @@ class GeminiBrain:
                 "stream": False
             }
             
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+
             # Solo GLM-4.7 soporta el parámetro de thinking (razonamiento)
             if model == "glm-4.7":
                 kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
-            # Ejecutar en thread aparte para no bloquear
+            # Ejecutar llamada inicial
             response = await asyncio.to_thread(
                 self.zhipu_client.chat.completions.create,
                 **kwargs
             )
             
-            content = response.choices[0].message.content
+            response_message = response.choices[0].message
+            tool_calls = response_message.tool_calls
+            
+            # Si hay llamadas a herramientas
+            if tool_calls:
+                # Agregar mensaje del asistente con tool_calls al historial
+                messages.append(response_message)
+                
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    if function_name == "web_search":
+                        query = function_args.get("query")
+                        print(f"🛠️ Ejecutando herramienta: web_search('{query}')")
+                        
+                        # Ejecutar búsqueda manual (DuckDuckGo)
+                        search_result = self._search_ddg(query)
+                        
+                        # Agregar resultado al historial
+                        messages.append({
+                            "tool_call_id": tool_call.id,
+                            "role": "tool",
+                            "name": "web_search",
+                            "content": search_result
+                        })
+                
+                # Segunda llamada: Obtener respuesta final con la info de la herramienta
+                print("🤖 Generando respuesta final con datos de búsqueda...")
+                # Removemos tools para la respuesta final para forzar texto
+                if "tools" in kwargs:
+                    del kwargs["tools"]
+                    del kwargs["tool_choice"]
+                    
+                final_response = await asyncio.to_thread(
+                    self.zhipu_client.chat.completions.create,
+                    **kwargs
+                )
+                content = final_response.choices[0].message.content
+            else:
+                content = response_message.content
             
             if is_json:
                 # Limpiar markdown si existe
@@ -518,7 +636,8 @@ REGLAS DE COMPORTAMIENTO:
                 system_prompt=None, 
                 user_prompt=text_prompt, 
                 is_json=True, 
-                image_data=image_data
+                image_data=image_data,
+                enable_search=True # Habilitar búsqueda web
             )
             if zhipu_result:
                 return zhipu_result
