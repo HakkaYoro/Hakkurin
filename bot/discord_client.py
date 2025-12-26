@@ -117,9 +117,36 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
     async def before_reminders(self):
         await self.wait_until_ready()
 
+    async def update_bot_status(self, status_type="idle", activity_text=None):
+        """Actualiza el estado y actividad del bot."""
+        if not self.is_ready():
+            return
+
+        try:
+            status = discord.Status.idle
+            if status_type == "online":
+                status = discord.Status.online
+                if not activity_text: activity_text = "Conversando"
+            elif status_type == "dnd":
+                status = discord.Status.dnd
+                if not activity_text: activity_text = "Ocupada / Error"
+            else:
+                status = discord.Status.idle
+                if not activity_text: activity_text = "Esperando..."
+
+            activity = discord.CustomActivity(name=activity_text) if activity_text else None
+            # CustomActivity a veces no se muestra bien, mejor Game o Watching
+            if activity_text:
+                activity = discord.Game(name=activity_text)
+            
+            await self.change_presence(status=status, activity=activity)
+        except Exception as e:
+            print(f"Error actualizando status: {e}")
+
     async def on_ready(self):
         print(f'Conectado como {self.user} (ID: {self.user.id})')
         print('------')
+        await self.update_bot_status("idle")
 
     def _load_status_messages(self):
         import json
@@ -161,6 +188,18 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
     async def check_timeouts_task(self):
         """Revisa sesiones expiradas cada minuto."""
         await conversation_manager.check_timeouts(self.send_message_callback)
+        
+        # Verificar si hay sesiones activas para actualizar el estado
+        any_active = False
+        for session in conversation_manager.sessions.values():
+            if session.is_active:
+                any_active = True
+                break
+        
+        if not any_active:
+            await self.update_bot_status("idle")
+        else:
+            await self.update_bot_status("online")
 
     async def send_message_callback(self, channel_id, text):
         """Callback para que el manager pueda enviar mensajes."""
@@ -212,6 +251,9 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         if should_process:
             # Activar sesión explícitamente
             session.activate()
+            
+            # Actualizar estado visual del bot
+            asyncio.create_task(self.update_bot_status("online"))
             
             # DEBOUNCE LOGIC Y CANCELACIÓN POR INTERRUPCIÓN
             # Si alguien habla en el canal mientras el bot piensa, cancelamos para que re-evalúe con el nuevo contexto.
@@ -441,6 +483,7 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             
         elif intent == "error":
             print(f"Error crítico detectado en análisis de IA. Activando modo sueño de emergencia.")
+            await self.update_bot_status("dnd", "Error Crítico")
             await self.enter_sleep_mode(message.channel)
 
     async def save_interaction(self, user_id, user_name, content, is_bot=False):

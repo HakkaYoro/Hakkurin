@@ -39,7 +39,8 @@ async def update_config(
     system_prompt: str = Form(...),
     reply_probability: float = Form(...),
     developer_id: str = Form(...),
-    gemini_keys: str = Form(...) # Recibiremos las keys como texto separado por líneas
+    gemini_keys: str = Form(...), # Recibiremos las keys como texto separado por líneas
+    zhipu_api_key: str = Form(None) # Opcional
 ):
     # Procesar keys
     keys_list = [k.strip() for k in gemini_keys.split('\n') if k.strip()]
@@ -51,6 +52,8 @@ async def update_config(
     config.set("reply_probability", reply_probability)
     config.set("developer_id", developer_id)
     config.set("gemini_keys", keys_list)
+    if zhipu_api_key:
+        config.set("zhipu_api_key", zhipu_api_key.strip())
     
     return RedirectResponse(url="/?saved=true", status_code=303)
 

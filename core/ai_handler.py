@@ -3,6 +3,7 @@ import json
 import time
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from core.config_manager import config
 
 # Límites definidos por el usuario
@@ -55,7 +56,11 @@ class GeminiBrain:
         self.gemma_tokens_this_minute = 0
         self.gemma_last_reset = 0
         
+        # Zhipu AI Client
+        self.zhipu_client = None
+        
         self._initialize_client()
+        self._initialize_zhipu_client()
 
     def _get_usage(self, index):
         if index not in self.key_usage:
@@ -69,6 +74,24 @@ class GeminiBrain:
         self.current_key_index = 0
         self.client = None
         self._initialize_client()
+        self._initialize_zhipu_client()
+
+    def _initialize_zhipu_client(self):
+        zhipu_key = config.get("zhipu_api_key")
+        if zhipu_key:
+            try:
+                # Usar OpenAI client compatible con Zhipu AI (Endpoint personalizado del usuario)
+                self.zhipu_client = OpenAI(
+                    api_key=zhipu_key,
+                    base_url="https://api.z.ai/api/coding/paas/v4" 
+                )
+                print("Cliente ZhipuAI (vía OpenAI SDK) inicializado.")
+            except Exception as e:
+                print(f"Error inicializando ZhipuAI: {e}")
+                self.zhipu_client = None
+        else:
+            print("No se encontró API Key de ZhipuAI. Se usará solo Gemini.")
+            self.zhipu_client = None
 
     def _initialize_client(self):
         if not self.keys:
@@ -121,6 +144,74 @@ class GeminiBrain:
 
     def _update_gemma_usage(self, tokens):
         self.gemma_tokens_this_minute += tokens
+
+    async def _generate_with_zhipu(self, system_prompt, user_prompt, is_json=False, image_data=None):
+        """Genera respuesta usando ZhipuAI (GLM-4.7) vía OpenAI SDK."""
+        if not self.zhipu_client:
+            return None
+            
+        import base64
+        import asyncio
+        
+        model = "glm-4.7"
+        messages = []
+        
+        # System Prompt
+        if system_prompt:
+             messages.append({"role": "system", "content": system_prompt})
+        
+        # User Content
+        user_content = []
+        if image_data:
+            model = "glm-4v" # Usar modelo de visión (Mantener 4v para imágenes)
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            user_content.append({
+                "type": "text",
+                "text": user_prompt
+            })
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            })
+        else:
+            # OpenAI SDK espera string si es solo texto, o lista de dicts
+            user_content = user_prompt
+
+        messages.append({"role": "user", "content": user_content})
+
+        try:
+            print(f"🤖 Intentando generar con ZhipuAI ({model}) [OpenAI SDK]...")
+            
+            # Ejecutar en thread aparte para no bloquear
+            response = await asyncio.to_thread(
+                self.zhipu_client.chat.completions.create,
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                top_p=0.7,
+                max_tokens=1024,
+                stream=False,
+                extra_body={"thinking": {"type": "disabled"}} # Desactivar razonamiento nativo de Zhipu
+            )
+            
+            content = response.choices[0].message.content
+            
+            if is_json:
+                # Limpiar markdown si existe
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                
+                return json.loads(content)
+            
+            return content
+
+        except Exception as e:
+            print(f"❌ Error con ZhipuAI: {e}")
+            return None
 
     async def _generate_with_retry(self, prompt, config_gen, is_json=False, force_model=None):
         """
@@ -407,6 +498,21 @@ REGLAS DE COMPORTAMIENTO:
         if image_data and image_mime_type:
             contents.append(types.Part.from_bytes(data=image_data, mime_type=image_mime_type))
 
+        # 1. Intentar con ZhipuAI (GLM-4) como primario
+        if self.zhipu_client:
+            # Pasamos todo el text_prompt como user_prompt para mantener el contexto completo
+            # No pasamos system_prompt separado porque ya está incluido en text_prompt
+            zhipu_result = await self._generate_with_zhipu(
+                system_prompt=None, 
+                user_prompt=text_prompt, 
+                is_json=True, 
+                image_data=image_data
+            )
+            if zhipu_result:
+                return zhipu_result
+            print("⚠️ Falló ZhipuAI, haciendo fallback a Gemini...")
+
+        # 2. Fallback a Gemini (Sistema Original)
         result = await self._generate_with_retry(contents, config_gen, is_json=True)
         
         if result:
