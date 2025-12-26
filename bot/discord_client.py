@@ -217,8 +217,17 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             return
 
         allowed_channels = config.get("allowed_channels", [])
-        if allowed_channels and message.channel.id not in allowed_channels:
+        # Permitir DMs (message.guild is None) o canales permitidos
+        if message.guild is not None and allowed_channels and message.channel.id not in allowed_channels:
             return
+
+        # VERBOSE LOGGING FOR DMs (INPUT)
+        if isinstance(message.channel, discord.DMChannel):
+            print(f"\n[DM INPUT] De: {message.author.name} (ID: {message.author.id})")
+            print(f"[DM INPUT] Contenido: {message.content}")
+            if message.attachments:
+                print(f"[DM INPUT] Adjuntos: {[a.filename for a in message.attachments]}")
+            print("-" * 30)
 
         # 1. Actualizar sesión y contexto global del canal
         # Ahora pasamos user_name y message_content para que se añada al historial global
@@ -325,20 +334,31 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
                 active_user_ids.append(str(mention.id))
         
         # PROCESAR IMÁGENES (Multimodal)
-        image_data = None
-        image_mime_type = None
-        
+        # 1. Guardar imágenes del mensaje actual en el contexto del canal
         if message.attachments:
             for attachment in message.attachments:
-                # Filtrar por extensiones permitidas y tamaño razonable (< 4MB para no saturar)
                 if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
                     try:
                         print(f"Descargando imagen: {attachment.filename}")
-                        image_data = await attachment.read()
-                        image_mime_type = attachment.content_type or "image/jpeg"
-                        break # Solo procesamos la primera imagen por ahora
+                        img_data = await attachment.read()
+                        mime = attachment.content_type or "image/jpeg"
+                        # Guardar en buffer del canal
+                        conversation_manager.get_channel_context(message.channel.id).add_image(img_data, mime)
                     except Exception as e:
                         print(f"Error descargando imagen: {e}")
+
+        # 2. Recuperar imágenes recientes del contexto (incluyendo la que acabamos de guardar)
+        # Esto asegura que si nos interrumpieron, la imagen anterior sigue ahí
+        recent_images = conversation_manager.get_channel_context(message.channel.id).get_recent_images(seconds=60)
+        
+        image_data = None
+        image_mime_type = None
+        
+        if recent_images:
+            # Usar la última imagen disponible
+            # (Podríamos pasar todas, pero por ahora el brain solo acepta una)
+            image_data, image_mime_type = recent_images[-1]
+            print(f"Usando imagen del contexto (Total en buffer: {len(recent_images)})")
 
         # Análisis de IA
         analysis = await brain.analyze_interaction(
@@ -453,6 +473,12 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
                              await message.channel.send(msg_text) # Fallback si el mensaje se borró
                     else:
                         await message.channel.send(msg_text)
+
+                    # VERBOSE LOGGING FOR DMs (OUTPUT)
+                    if isinstance(message.channel, discord.DMChannel):
+                        print(f"\n[DM OUTPUT] Para: {user_name} (ID: {user_id})")
+                        print(f"[DM OUTPUT] Contenido: {msg_text}")
+                        print("-" * 30)
                 
                 full_response_text += msg_text + " "
                 # Pequeña pausa entre mensajes

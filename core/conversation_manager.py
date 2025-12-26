@@ -41,12 +41,26 @@ class ChannelContext:
     def __init__(self, channel_id):
         self.channel_id = channel_id
         self.messages = [] # Lista de dicts: {'timestamp': float, 'content': str, 'author': str}
+        self.recent_images = [] # Lista de dicts: {'timestamp': float, 'data': bytes, 'mime': str}
         self.last_bot_activity = 0 # Timestamp de la última vez que el bot habló aquí
 
     def add_message(self, author_name, author_id, content):
         now = time.time()
         self.messages.append({'timestamp': now, 'content': content, 'author': author_name, 'author_id': author_id})
         self._cleanup(now)
+
+    def add_image(self, image_data, mime_type):
+        """Guarda una imagen reciente en el contexto del canal."""
+        now = time.time()
+        self.recent_images.append({'timestamp': now, 'data': image_data, 'mime': mime_type})
+        self._cleanup(now)
+
+    def get_recent_images(self, seconds=60):
+        """Retorna imágenes recibidas en los últimos X segundos."""
+        now = time.time()
+        cutoff = now - seconds
+        # Retornar lista de tuplas (data, mime)
+        return [(img['data'], img['mime']) for img in self.recent_images if img['timestamp'] > cutoff]
 
     def update_bot_activity(self):
         self.last_bot_activity = time.time()
@@ -59,6 +73,9 @@ class ChannelContext:
         # Mantener últimos 50 mensajes o 1 hora
         cutoff = now - 3600
         self.messages = [msg for msg in self.messages if msg['timestamp'] > cutoff][-50:]
+        # Limpiar imágenes viejas (> 5 minutos para dar margen)
+        img_cutoff = now - 300
+        self.recent_images = [img for img in self.recent_images if img['timestamp'] > img_cutoff]
 
     def get_formatted_history(self):
         # Formato: Nombre (ID: 12345): Mensaje
