@@ -249,7 +249,10 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         # Verificar si el bot está "enganchado" en la conversación del canal (habló hace poco)
         is_channel_engaged = conversation_manager.get_channel_context(message.channel.id).is_bot_engaged()
         
-        should_process = is_mentioned or is_reply or was_active or is_channel_engaged
+        # DMs siempre deben procesarse
+        is_dm = isinstance(message.channel, discord.DMChannel)
+
+        should_process = is_mentioned or is_reply or was_active or is_channel_engaged or is_dm
         
         if not should_process:
             reply_prob = config.get("reply_probability", 0.01) # Reducido a 1% para evitar spam inicial

@@ -65,17 +65,23 @@ async def run_simulation():
         mock_message.content = "Hola bot, ¿estás ahí?"
         mock_message.guild = None # DM no tiene guild
         mock_message.attachments = []
-        mock_message.mentions = []
+        mock_message.mentions = [] # SIN MENCIONES
         mock_message.reference = None
 
         # 4. Ejecutar on_message
-        print("\n>>> Enviando mensaje simulado...")
+        print("\n>>> Enviando mensaje simulado (SIN MENCION)...")
         await bot.on_message(mock_message)
         
         # Esperar un poco a que las tareas asíncronas terminen (debounce, etc)
         # El bot usa create_task para process_with_debounce, así que necesitamos esperar
         print(">>> Esperando procesamiento...")
         await asyncio.sleep(4) # 3s debounce + 1s buffer
+        
+        # Verificar que se llamó a analyze_interaction (significa que pasó el filtro)
+        if mock_brain.analyze_interaction.called:
+             print(">>> EXITO: El mensaje fue procesado por el Brain.")
+        else:
+             print(">>> FALLO: El mensaje NO fue procesado.")
 
     print("\n--- FIN SIMULACION ---")
 

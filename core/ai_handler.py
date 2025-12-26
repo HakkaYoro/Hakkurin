@@ -558,6 +558,17 @@ Solo el texto del mensaje.
             top_k=40
         )
 
+        # 1. Intentar con ZhipuAI
+        if self.zhipu_client:
+            zhipu_result = await self._generate_with_zhipu(
+                system_prompt=None,
+                user_prompt=prompt,
+                is_json=False
+            )
+            if zhipu_result:
+                return zhipu_result
+            print("⚠️ Falló ZhipuAI en Holiday Greeting, haciendo fallback a Gemini...")
+
         result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         return result if result else f"feliz {holiday_name} supongo..."
 
@@ -667,6 +678,22 @@ Solo el texto del resumen.
             top_p=0.95,
             top_k=40
         )
+
+        # 1. Intentar con ZhipuAI
+        if self.zhipu_client:
+            # Para resúmenes, el prompt ya incluye todo el contexto
+            zhipu_result = await self._generate_with_zhipu(
+                system_prompt=None,
+                user_prompt=prompt,
+                is_json=False
+            )
+            if zhipu_result:
+                # Zhipu a veces devuelve markdown extra, limpiamos si es necesario
+                if "```json" in zhipu_result and user_id == "hakkurin_internal_self":
+                     # Si es self-memory, esperamos JSON en una parte
+                     pass 
+                return zhipu_result
+            print("⚠️ Falló ZhipuAI en Summary, haciendo fallback a Gemini...")
 
         result = await self._generate_with_retry(prompt, config_gen, is_json=False, force_model=model_name)
         
