@@ -364,6 +364,8 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con √
             print(f"Usando imagen del contexto (Total en buffer: {len(recent_images)})")
 
         # An√°lisis de IA
+        is_dm = isinstance(message.channel, discord.DMChannel)
+        
         analysis = await brain.analyze_interaction(
             user_text=user_text,
             user_id=user_id,
@@ -372,7 +374,8 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con √
             is_session_active=session.is_active,
             image_data=image_data,
             image_mime_type=image_mime_type,
-            active_user_ids=active_user_ids
+            active_user_ids=active_user_ids,
+            is_dm=is_dm
         )
         
         print(f"An√°lisis para {user_name}: {analysis}")

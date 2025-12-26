@@ -362,7 +362,7 @@ class GeminiBrain:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
         return None
 
-    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None, active_user_ids=None):
+    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None, active_user_ids=None, is_dm=False):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
         Soporta imágenes (multimodal) y contexto dinámico de usuarios activos.
@@ -436,6 +436,9 @@ class GeminiBrain:
 
         # Cargar memoria propia
         self_mem = memory.get_self_memory()
+        
+        # Determinar tipo de canal para el prompt
+        channel_type_str = "DM (Mensaje Directo PRIVADO)" if is_dm else "Servidor (Canal PÚBLICO)"
 
         text_prompt = f"""
 {system_prompt}
@@ -451,6 +454,7 @@ TU EDAD: {bot_age_str}
 
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
+- Tipo de Canal: {channel_type_str}
 
 DATOS INTERNOS (Tu propia memoria de lo que has hecho/dicho):
 {self_mem}
@@ -603,7 +607,7 @@ INSTRUCCIONES CRÍTICAS:
 3. Sé explícita, detallada y técnica sobre tu propio estado y compromisos.
 4. NO USES EMOJIS en ninguna parte del reporte.
 5. Si detectas un compromiso con FECHA Y HORA específica, DEBES incluirlo en la sección JSON final.
-6. 🛑 FILTRO CRÍTICO: Revisa las "NUEVAS INTERACCIONES". Si ves un mensaje que dice "EJECUTÉ RECORDATORIO: [X]", ENTONCES [X] YA ESTÁ HECHO. ¡NO LO INCLUYAS EN EL JSON! Elimínalo de tu lista de pendientes.
+6. FILTRO CRITICO: Revisa las "NUEVAS INTERACCIONES". Si ves un mensaje que dice "EJECUTÉ RECORDATORIO: [X]", ENTONCES [X] YA ESTÁ HECHO. NO LO INCLUYAS EN EL JSON! Elimínalo de tu lista de pendientes.
 
 FORMATO DE SALIDA (Markdown + JSON):
 
@@ -659,22 +663,16 @@ NUEVAS INTERACCIONES:
 {chr(10).join(recent_interactions)}
 
 INSTRUCCIONES:
-1. Actualiza el perfil con los nuevos datos.
-2. Sé EXTREMADAMENTE CONCISO y DIRECTO. Usa bullet points.
-3. Si no hay información sobre un aspecto (ej. edad, gustos), NO LO MENCIONES. No escribas "No se sabe la edad". Simplemente omítelo.
-4. Si no hay NADA de información relevante (ni previa ni nueva), devuelve SOLO el string: "Sin información suficiente."
-5. Estructura deseada (solo si hay datos):
-   - Alias: [Nombre]
-   - Datos: [Edad, Género, etc.]
-   - Personalidad: [Rasgos observados]
-   - Gustos: [Lista corta]
-   - Relación: [Opinión de Hakkurin]
+1. Actualiza el resumen con la nueva información.
+2. Mantén los datos importantes (nombre, gustos, hechos clave).
+3. Elimina detalles triviales o muy antiguos que ya no sean relevantes.
+4. Sé conciso pero completo.
 
 SALIDA:
-Solo el texto del resumen.
+Solo el texto del nuevo resumen.
 """
         config_gen = types.GenerateContentConfig(
-            temperature=0.3,
+            temperature=0.85,
             top_p=0.95,
             top_k=40
         )

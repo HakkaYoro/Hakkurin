@@ -77,9 +77,13 @@ async def run_simulation():
         print(">>> Esperando procesamiento...")
         await asyncio.sleep(4) # 3s debounce + 1s buffer
         
-        # Verificar que se llamó a analyze_interaction (significa que pasó el filtro)
+        # Verificar que se llamó a analyze_interaction con is_dm=True
         if mock_brain.analyze_interaction.called:
-             print(">>> EXITO: El mensaje fue procesado por el Brain.")
+             args, kwargs = mock_brain.analyze_interaction.call_args
+             if kwargs.get('is_dm') is True:
+                 print(">>> EXITO: El mensaje fue procesado como DM (is_dm=True).")
+             else:
+                 print(f">>> FALLO: is_dm no es True. Kwargs: {kwargs}")
         else:
              print(">>> FALLO: El mensaje NO fue procesado.")
 
