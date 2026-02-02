@@ -166,6 +166,7 @@ class MusicManager:
             await interaction.response.send_message("¡Ya has votado para saltar!", ephemeral=True)
 
     async def stop(self, interaction):
+        await interaction.response.defer()
         guild_id = interaction.guild.id
         if guild_id in self.queues:
             self.queues[guild_id].clear()
@@ -176,9 +177,9 @@ class MusicManager:
             if interaction.guild.voice_client.is_playing():
                 interaction.guild.voice_client.stop()
             await interaction.guild.voice_client.disconnect()
-            await interaction.response.send_message("⏹️ Música detenida y desconectada.")
+            await interaction.followup.send("⏹️ Música detenida y desconectada.")
         else:
-             await interaction.response.send_message("No estoy conectado.", ephemeral=True)
+             await interaction.followup.send("No estoy conectado.")
 
     async def queue_info(self, interaction):
         guild_id = interaction.guild.id
