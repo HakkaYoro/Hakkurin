@@ -8,3 +8,5 @@ jinja2
 python-multipart
 openai
 ddgs
+yt-dlp
+PyNaCl

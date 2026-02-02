@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Instalar dependencias del sistema necesarias (si las hubiera, por ahora git es útil)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git ffmpeg libsodium-dev && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements e instalar dependencias
 COPY requirements.txt .

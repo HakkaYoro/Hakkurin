@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 import random
 import asyncio
 from discord.ext import tasks
@@ -7,6 +8,7 @@ from core.ai_handler import brain
 from core.memory_manager import memory
 from core.conversation_manager import conversation_manager
 from core.scheduler import scheduler
+from bot.music_manager import MusicManager
 
 class HakkurinBot(discord.Client):
     def __init__(self):
@@ -26,8 +28,37 @@ class HakkurinBot(discord.Client):
         
         # Cache para evitar repetir acciones muy seguido
         self.executed_actions_cache = set()
+        
+        # Inicializar gestor de música
+        self.music_manager = MusicManager(self)
+        
+        # Inicializar Command Tree para Slash Commands
+        self.tree = app_commands.CommandTree(self)
+        
+        # Definir Slash Commands
+        @self.tree.command(name="play", description="Reproduce música desde una URL de YouTube")
+        @app_commands.describe(url="La URL del video o canción a reproducir")
+        async def play_command(interaction: discord.Interaction, url: str):
+            await self.music_manager.play(interaction, url)
+            
+        @self.tree.command(name="skip", description="Vota para saltar la canción actual")
+        async def skip_command(interaction: discord.Interaction):
+            await self.music_manager.skip(interaction)
+            
+        @self.tree.command(name="stop", description="Detiene la música y desconecta al bot")
+        async def stop_command(interaction: discord.Interaction):
+            await self.music_manager.stop(interaction)
+            
+        @self.tree.command(name="queue", description="Muestra la cola de reproducción actual")
+        async def queue_command(interaction: discord.Interaction):
+            await self.music_manager.queue_info(interaction)
 
     async def setup_hook(self):
+        # Sincronizar comandos (Global sync - puede tardar hasta 1h en propagarse si no se hace en guild específico, pero para desarrollo ok)
+        # Para desarrollo rápido, se recomienda sincronizar con guild específico self.tree.sync(guild=discord.Object(id=...))
+        await self.tree.sync()
+        
+        # Iniciar tarea de fondo para timeouts
         # Iniciar tarea de fondo para timeouts
         self.check_timeouts_task.start()
         # Iniciar tarea de festividades
@@ -220,6 +251,23 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         # Permitir DMs (message.guild is None) o canales permitidos
         if message.guild is not None and allowed_channels and message.channel.id not in allowed_channels:
             return
+
+        # --- MUSIC COMMANDS HANDLING ---
+        # Removido: Ahora usamos Slash Commands
+        # -------------------------------
+        
+        # --- DEBUG COMMANDS ---
+        if message.content.strip() == "!sync":
+             if message.author.guild_permissions.administrator:
+                 await message.channel.send("Sincronizando comandos en este servidor...")
+                 try:
+                     self.tree.copy_global_to(guild=message.guild)
+                     await self.tree.sync(guild=message.guild)
+                     await message.channel.send("✅ Comandos sincronizados. Deberían aparecer en unos instantes.")
+                 except Exception as e:
+                     await message.channel.send(f"❌ Error sincronizando: {e}")
+             return
+        # ----------------------
 
         # VERBOSE LOGGING FOR DMs (INPUT)
         if isinstance(message.channel, discord.DMChannel):
