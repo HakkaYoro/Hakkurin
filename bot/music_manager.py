@@ -65,7 +65,6 @@ class MusicManager:
         self.current_song = {} # guild_id -> current song title
         self.skip_votes = {} # guild_id -> set(user_id)
         self.empty_vcs = {} # guild_id -> timestamp
-        self.check_empty_voice_channels.start()
 
     def cog_unload(self):
         self.check_empty_voice_channels.cancel()

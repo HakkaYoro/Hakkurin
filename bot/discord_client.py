@@ -107,6 +107,8 @@ class HakkurinBot(discord.Client):
         self.recovery_check_task.start()
         # Iniciar tarea de recordatorios
         self.check_reminders_task.start()
+        # Iniciar tarea de desconexión de voz vacía
+        self.music_manager.check_empty_voice_channels.start()
 
     @tasks.loop(minutes=1)
     async def check_reminders_task(self):
