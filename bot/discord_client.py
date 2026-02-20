@@ -69,27 +69,18 @@ class HakkurinBot(discord.Client):
             else:
                 await interaction.followup.send(embed=embed, view=view)
 
-        @self.tree.command(name="radio", description="Inicia una radio de un artista desde Navidrome")
-        @app_commands.describe(artist="Nombre del artista")
-        async def radio_command(interaction: discord.Interaction, artist: str):
+        @self.tree.command(name="radio", description="Inicia una radio de un artista desde Navidrome de forma interactiva")
+        @app_commands.describe(query="Lo que deseas buscar para iniciar la radio")
+        async def radio_command(interaction: discord.Interaction, query: str):
             await interaction.response.defer()
-            songs = await navidrome_client.get_artist_radio(artist, count=20)
-            if not songs:
-                await interaction.followup.send(f"No se encontraron canciones para el artista: {artist}")
-                return
-            
-            items = []
-            for song in songs:
-                items.append({
-                    "type": "navidrome",
-                    "url": navidrome_client.get_stream_url(song["id"]),
-                    "id": song["id"],
-                    "title": song.get("title", "Unknown"),
-                    "artist": song.get("artist", "Unknown"),
-                    "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
-                })
-                
-            await self.music_manager.play_navidrome_items(interaction, items)
+            results = await navidrome_client.search(query, limit=5)
+            view = NavidromeSearchView(self.music_manager, results, interaction, is_radio=True)
+            embed = view.generate_embed(query)
+            embed.title = f"📻 Resultados para Radio: {query}"
+            if not view.songs and not view.albums and not view.artists:
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send(embed=embed, view=view)
 
     async def setup_hook(self):
         # Sincronizar comandos (Global sync - puede tardar hasta 1h en propagarse si no se hace en guild específico, pero para desarrollo ok)

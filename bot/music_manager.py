@@ -3,6 +3,7 @@ import asyncio
 import yt_dlp
 import logging
 import urllib.parse
+import functools
 from discord.ext import tasks
 # Configuración de yt-dlp
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
@@ -57,6 +58,32 @@ class YTDLSource(discord.PCMVolumeTransformer):
             print(f"DEBUG: Error in from_url: {e}")
             raise e
 
+class QueueView(discord.ui.View):
+    def __init__(self, music_manager, guild_id):
+        super().__init__(timeout=120)
+        self.music_manager = music_manager
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Limpiar Cola", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def clear_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Solo los administradores pueden limpiar la cola.", ephemeral=True)
+            return
+            
+        if self.guild_id in self.music_manager.queues:
+            self.music_manager.queues[self.guild_id].clear()
+            await interaction.response.send_message("✅ La cola de reproducción ha sido limpiada.")
+        else:
+            await interaction.response.send_message("La cola ya está vacía.", ephemeral=True)
+            
+        # Disable button
+        for item in self.children:
+            item.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except Exception:
+            pass
+
 class MusicManager:
     def __init__(self, bot):
         self.bot = bot
@@ -65,6 +92,8 @@ class MusicManager:
         self.current_song = {} # guild_id -> current song title
         self.skip_votes = {} # guild_id -> set(user_id)
         self.empty_vcs = {} # guild_id -> timestamp
+        self.play_history = {} # guild_id -> list of song dicts
+        self.is_radio_mode = {} # guild_id -> bool
 
     def cog_unload(self):
         self.check_empty_voice_channels.cancel()
@@ -121,8 +150,20 @@ class MusicManager:
         if guild_id in self.skip_votes:
             self.skip_votes[guild_id].clear()
 
+        # Infinite Radio Logic
+        if self.is_radio_mode.get(guild_id, False) and len(queue) <= 1:
+            self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
+
         if len(queue) >= 1:
             item = queue.pop(0)
+            
+            # Record in play history
+            if guild_id not in self.play_history:
+                self.play_history[guild_id] = []
+            self.play_history[guild_id].append(item)
+            if len(self.play_history[guild_id]) > 5:
+                self.play_history[guild_id].pop(0)
+                
             if isinstance(item, str):
                 item = {"type": "youtube", "url": item}
                 
@@ -145,7 +186,7 @@ class MusicManager:
                     if item.get("type") == "navidrome" and item.get("cover_url"):
                         embed = discord.Embed(title="🎶 Reproduciendo ahora", description=f"**{self.current_song[guild_id]}**", color=discord.Color.blue())
                         embed.set_thumbnail(url=item["cover_url"])
-                        embed.set_footer(text="Navidrome Music")
+                        embed.set_footer(text="Hakkurei Music")
                         await channel.send(embed=embed)
                     else:
                         await channel.send(f'🎶 Reproduciendo ahora: **{self.current_song[guild_id]}**')
@@ -160,6 +201,29 @@ class MusicManager:
         else:
             self.current_song[guild_id] = None
 
+    async def _auto_queue_radio(self, guild_id, channel):
+        from bot.navidrome_client import navidrome_client
+        history = self.play_history.get(guild_id, [])
+        navidrome_ids = [item["id"] for item in history if isinstance(item, dict) and item.get("type") == "navidrome" and item.get("id")]
+        
+        songs = await navidrome_client.get_similar_songs(navidrome_ids, count=10)
+        
+        if not songs:
+            return
+            
+        queue = self.get_queue(guild_id)
+        for song in songs:
+           queue.append({
+                "type": "navidrome",
+                "url": navidrome_client.get_stream_url(song["id"]),
+                "id": song["id"],
+                "title": song.get("title", "Unknown"),
+                "artist": song.get("artist", "Unknown"),
+                "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
+           })
+        guild_id = guild_id # To satisfy linter/avoid breaking indentation simply
+        await channel.send(f"📻 *Radio: Añadidas {len(songs)} canciones en la cola.*")
+
     async def play(self, interaction, url):
         # Join channel if not already in one
         if not interaction.guild.voice_client:
@@ -168,6 +232,9 @@ class MusicManager:
         
         # Defer response as extracting info takes time
         await interaction.response.defer()
+
+        # Disable radio mode for manual plays
+        self.is_radio_mode[interaction.guild.id] = False
 
         # Add to queue
         queue = self.get_queue(interaction.guild.id)
@@ -197,14 +264,15 @@ class MusicManager:
             await interaction.followup.send(f'✅ {count_str} añadida(s) a la cola desde Navidrome.')
 
     async def skip(self, interaction):
+        await interaction.response.defer()
         guild = interaction.guild
         if not guild.voice_client or not guild.voice_client.is_playing():
-            await interaction.response.send_message("No hay nada reproduciéndose.", ephemeral=True)
+            await interaction.followup.send("No hay nada reproduciéndose.", ephemeral=True)
             return
 
         # Check if user is in the same voice channel
         if not interaction.user.voice or interaction.user.voice.channel != guild.voice_client.channel:
-             await interaction.response.send_message("Debes estar en el mismo canal de voz para saltar la canción.", ephemeral=True)
+             await interaction.followup.send("Debes estar en el mismo canal de voz para saltar la canción.", ephemeral=True)
              return
 
         # Voting Logic
@@ -224,16 +292,18 @@ class MusicManager:
             
             if current_votes >= total_votes_needed:
                 guild.voice_client.stop()
-                await interaction.response.send_message("⏭️ ¡Votación completada! Saltando canción.")
+                await interaction.followup.send("⏭️ ¡Votación completada! Saltando canción.")
                 self.skip_votes[guild.id].clear()
             else:
-                await interaction.response.send_message(f"🗳️ Voto registrado ({current_votes}/{total_votes_needed}).")
+                await interaction.followup.send(f"🗳️ Voto registrado ({current_votes}/{total_votes_needed}).")
         else:
-            await interaction.response.send_message("¡Ya has votado para saltar!", ephemeral=True)
+            await interaction.followup.send("¡Ya has votado para saltar!", ephemeral=True)
 
     async def stop(self, interaction):
         await interaction.response.defer()
         guild_id = interaction.guild.id
+        self.is_radio_mode[guild_id] = False
+        
         if guild_id in self.queues:
             self.queues[guild_id].clear()
         if guild_id in self.skip_votes:
@@ -256,17 +326,26 @@ class MusicManager:
             await interaction.response.send_message("La cola está vacía.")
             return
 
-        msg = f"🎶 **Reproduciendo ahora:** {current}\n\n**En cola:**\n"
-        for i, item in enumerate(queue):
-            if isinstance(item, str):
-                title = item
-            else:
-                title = item.get("title", item.get("url", "Unknown"))
-                if item.get("artist") and item.get("artist") != "Unknown Artist":
-                    title = f"{item['artist']} - {title}"
+        embed = discord.Embed(title="🎶 Cola de Reproducción", color=discord.Color.blue())
+        if current and current != "Nada":
+            embed.add_field(name="Reproduciendo ahora:", value=f"**{current}**", inline=False)
+        
+        if queue:
+            queue_text = ""
+            for i, item in enumerate(queue[:10]):
+                if isinstance(item, str):
+                    title = item
+                else:
+                    title = item.get("title", item.get("url", "Unknown"))
+                    if item.get("artist") and item.get("artist") not in ["Unknown Artist", "Unknown"]:
+                        title = f"{item['artist']} - {title}"
+                
+                queue_text += f"`{i + 1}.` {title}\n"
+                
+            if len(queue) > 10:
+                queue_text += f"\n*...y {len(queue) - 10} canciones más.*"
+                
+            embed.add_field(name="En cola:", value=queue_text, inline=False)
             
-            msg += f"{i+1}. {title}\n"
-            if i >= 9:
-                msg += "... y más"
-                break
-        await interaction.response.send_message(msg)
+        view = QueueView(self, guild_id)
+        await interaction.response.send_message(embed=embed, view=view)

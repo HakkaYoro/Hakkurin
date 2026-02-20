@@ -75,6 +75,44 @@ class NavidromeClient:
             print(f"Error getting radio for {artist_name}: {e}")
             return []
 
+    async def get_similar_songs(self, song_ids, count=10):
+        if not song_ids:
+            return await self.get_random_songs(count)
+            
+        params = self._get_auth_params()
+        # Subsonic API gets similar songs from a single item ID usually, or multiple if supported.
+        # We will pick a random ID from the history to base the similarity on, 
+        # or just ask Navidrome for `getSimilarSongs2` (which takes id)
+        base_id = random.choice(song_ids)
+        params.update({"id": base_id, "count": count})
+        
+        session = await self._get_session()
+        try:
+            async with session.get(f"{self.base_url}/getSimilarSongs2", params=params) as resp:
+                data = await resp.json()
+                songs = data.get("subsonic-response", {}).get("similarSongs2", {}).get("song", [])
+                if not songs:
+                    # Fallback if Last.fm integration is missing or no similar songs found
+                    return await self.get_random_songs(count)
+                
+                random.shuffle(songs)
+                return songs[:count]
+        except Exception as e:
+            print(f"Error fetching similar songs: {e}")
+            return await self.get_random_songs(count)
+
+    async def get_random_songs(self, count=10):
+        params = self._get_auth_params()
+        params.update({"size": count})
+        session = await self._get_session()
+        try:
+            async with session.get(f"{self.base_url}/getRandomSongs", params=params) as resp:
+                data = await resp.json()
+                return data.get("subsonic-response", {}).get("randomSongs", {}).get("song", [])
+        except Exception as e:
+            print(f"Error fetching random songs: {e}")
+            return []
+
     async def get_album_songs(self, album_id):
         params = self._get_auth_params()
         params.update({"id": album_id})

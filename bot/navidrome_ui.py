@@ -2,11 +2,12 @@ import discord
 from bot.navidrome_client import navidrome_client
 
 class NavidromeSearchView(discord.ui.View):
-    def __init__(self, music_manager, search_results, original_interaction):
+    def __init__(self, music_manager, search_results, original_interaction, is_radio=False):
         super().__init__(timeout=120)  # 2 minutes timeout
         self.music_manager = music_manager
         self.search_results = search_results
         self.original_interaction = original_interaction
+        self.is_radio = is_radio
         
         self.songs = search_results.get('song', [])[:5]
         self.albums = search_results.get('album', [])[:5]
@@ -38,13 +39,22 @@ class NavidromeSearchView(discord.ui.View):
             "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
         }
 
+    async def _play_radio_for_artist(self, interaction, artist_name):
+        artist_songs = await navidrome_client.get_artist_radio(artist_name, count=20)
+        items = [self._create_song_item(s) for s in artist_songs]
+        if items:
+            await self.music_manager.play_navidrome_items(interaction, items)
+        else:
+            await interaction.followup.send(f"No se encontraron canciones para el artista: {artist_name}", ephemeral=True)
+
     async def song_callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         idx = int(interaction.data["custom_id"].split("_")[1])
         song = self.songs[idx]
         item = self._create_song_item(song)
+        if self.is_radio:
+            self.music_manager.is_radio_mode[interaction.guild.id] = True
         await self.music_manager.play_navidrome_items(interaction, [item])
-        # Deshabilitar vista después de clickear para evitar spam
         await self._disable_all()
 
     async def album_callback(self, interaction: discord.Interaction):
@@ -52,8 +62,9 @@ class NavidromeSearchView(discord.ui.View):
         idx = int(interaction.data["custom_id"].split("_")[1])
         album = self.albums[idx]
         album_songs = await navidrome_client.get_album_songs(album["id"])
-        
         items = [self._create_song_item(s) for s in album_songs]
+        if self.is_radio:
+            self.music_manager.is_radio_mode[interaction.guild.id] = True
         if items:
             await self.music_manager.play_navidrome_items(interaction, items)
         else:
@@ -64,13 +75,9 @@ class NavidromeSearchView(discord.ui.View):
         await interaction.response.defer()
         idx = int(interaction.data["custom_id"].split("_")[1])
         artist = self.artists[idx]
-        artist_songs = await navidrome_client.get_artist_radio(artist["name"], count=20)
-        
-        items = [self._create_song_item(s) for s in artist_songs]
-        if items:
-            await self.music_manager.play_navidrome_items(interaction, items)
-        else:
-            await interaction.followup.send("No se encontraron canciones para este artista.", ephemeral=True)
+        if self.is_radio:
+            self.music_manager.is_radio_mode[interaction.guild.id] = True
+        await self._play_radio_for_artist(interaction, artist["name"])
         await self._disable_all()
 
     async def _disable_all(self):
