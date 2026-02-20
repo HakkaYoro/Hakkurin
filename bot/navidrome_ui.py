@@ -54,6 +54,7 @@ class NavidromeSearchView(discord.ui.View):
         item = self._create_song_item(song)
         if self.is_radio:
             self.music_manager.is_radio_mode[interaction.guild.id] = True
+            self.music_manager.radio_played_ids[interaction.guild.id] = set()
         await self.music_manager.play_navidrome_items(interaction, [item])
         await self._disable_all()
 
@@ -65,6 +66,7 @@ class NavidromeSearchView(discord.ui.View):
         items = [self._create_song_item(s) for s in album_songs]
         if self.is_radio:
             self.music_manager.is_radio_mode[interaction.guild.id] = True
+            self.music_manager.radio_played_ids[interaction.guild.id] = set()
         if items:
             await self.music_manager.play_navidrome_items(interaction, items)
         else:
@@ -77,6 +79,7 @@ class NavidromeSearchView(discord.ui.View):
         artist = self.artists[idx]
         if self.is_radio:
             self.music_manager.is_radio_mode[interaction.guild.id] = True
+            self.music_manager.radio_played_ids[interaction.guild.id] = set()
         await self._play_radio_for_artist(interaction, artist["name"])
         await self._disable_all()
 

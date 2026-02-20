@@ -94,6 +94,7 @@ class MusicManager:
         self.empty_vcs = {} # guild_id -> timestamp
         self.play_history = {} # guild_id -> list of song dicts
         self.is_radio_mode = {} # guild_id -> bool
+        self.radio_played_ids = {} # guild_id -> set
 
     def cog_unload(self):
         self.check_empty_voice_channels.cancel()
@@ -212,7 +213,16 @@ class MusicManager:
             return
             
         queue = self.get_queue(guild_id)
+        
+        if guild_id not in self.radio_played_ids:
+            self.radio_played_ids[guild_id] = set()
+            
+        added_count = 0
         for song in songs:
+           if song["id"] in self.radio_played_ids[guild_id]:
+               continue
+               
+           self.radio_played_ids[guild_id].add(song["id"])
            queue.append({
                 "type": "navidrome",
                 "url": navidrome_client.get_stream_url(song["id"]),
@@ -221,8 +231,13 @@ class MusicManager:
                 "artist": song.get("artist", "Unknown"),
                 "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
            })
+           added_count += 1
+           
+        if added_count == 0:
+            return
+            
         guild_id = guild_id # To satisfy linter/avoid breaking indentation simply
-        await channel.send(f"📻 *Radio: Añadidas {len(songs)} canciones en la cola.*")
+        await channel.send(f"📻 *Radio: Añadidas {added_count} canciones en la cola.*")
 
     async def play(self, interaction, url):
         # Join channel if not already in one
@@ -235,6 +250,8 @@ class MusicManager:
 
         # Disable radio mode for manual plays
         self.is_radio_mode[interaction.guild.id] = False
+        if interaction.guild.id in self.radio_played_ids:
+            self.radio_played_ids[interaction.guild.id].clear()
 
         # Add to queue
         queue = self.get_queue(interaction.guild.id)
@@ -303,6 +320,8 @@ class MusicManager:
         await interaction.response.defer()
         guild_id = interaction.guild.id
         self.is_radio_mode[guild_id] = False
+        if guild_id in self.radio_played_ids:
+            self.radio_played_ids[guild_id].clear()
         
         if guild_id in self.queues:
             self.queues[guild_id].clear()
