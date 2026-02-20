@@ -2,8 +2,8 @@ import discord
 import asyncio
 import yt_dlp
 import logging
-import functools
-
+import urllib.parse
+from discord.ext import tasks
 # Configuración de yt-dlp
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
 ytdl_format_options = {
@@ -64,6 +64,38 @@ class MusicManager:
         self.queues = {} # guild_id -> list of urls/titles
         self.current_song = {} # guild_id -> current song title
         self.skip_votes = {} # guild_id -> set(user_id)
+        self.empty_vcs = {} # guild_id -> timestamp
+        self.check_empty_voice_channels.start()
+
+    def cog_unload(self):
+        self.check_empty_voice_channels.cancel()
+
+    @tasks.loop(minutes=1)
+    async def check_empty_voice_channels(self):
+        for guild_id in list(self.queues.keys()):
+            guild = self.bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                channel_members = [m for m in guild.voice_client.channel.members if not m.bot]
+                if not channel_members:
+                    if guild_id not in self.empty_vcs:
+                        self.empty_vcs[guild_id] = discord.utils.utcnow()
+                    else:
+                        if (discord.utils.utcnow() - self.empty_vcs[guild_id]).total_seconds() >= 300:
+                            self.queues[guild_id].clear()
+                            self.skip_votes.pop(guild_id, None)
+                            self.empty_vcs.pop(guild_id, None)
+                            if guild.voice_client.is_playing():
+                                guild.voice_client.stop()
+                            await guild.voice_client.disconnect()
+                            self.logger.info(f"Disconnected from {guild.name} due to inactivity.")
+                else:
+                    self.empty_vcs.pop(guild_id, None)
+            else:
+                 self.empty_vcs.pop(guild_id, None)
+
+    @check_empty_voice_channels.before_loop
+    async def before_check_empty_voice_channels(self):
+        await self.bot.wait_until_ready()
 
     def get_queue(self, guild_id):
         if guild_id not in self.queues:
@@ -91,14 +123,33 @@ class MusicManager:
             self.skip_votes[guild_id].clear()
 
         if len(queue) >= 1:
-            url = queue.pop(0)
-            # async with channel.typing(): # Typing might fail if interaction context is lost/different
+            item = queue.pop(0)
+            if isinstance(item, str):
+                item = {"type": "youtube", "url": item}
+                
             try:
-                player = await YTDLSource.from_url(url, loop=self.bot.loop, stream=True)
+                if item.get("type") == "navidrome":
+                    stream_url = item["url"]
+                    title = item.get("title", "Navidrome Stream")
+                    artist = item.get("artist", "Unknown Artist")
+                    
+                    audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(stream_url, **ffmpeg_options), volume=0.5)
+                    audio_source.title = f"{artist} - {title}" if artist != "Unknown Artist" else title
+                    player = audio_source
+                else:
+                    player = await YTDLSource.from_url(item["url"], loop=self.bot.loop, stream=True)
+                    
                 if guild.voice_client:
                     guild.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(guild, channel)))
-                    self.current_song[guild_id] = player.title
-                    await channel.send(f'🎶 Reproduciendo ahora: **{player.title}**')
+                    self.current_song[guild_id] = getattr(player, 'title', item.get("title", "Unknown"))
+                    
+                    if item.get("type") == "navidrome" and item.get("cover_url"):
+                        embed = discord.Embed(title="🎶 Reproduciendo ahora", description=f"**{self.current_song[guild_id]}**", color=discord.Color.blue())
+                        embed.set_thumbnail(url=item["cover_url"])
+                        embed.set_footer(text="Navidrome Music")
+                        await channel.send(embed=embed)
+                    else:
+                        await channel.send(f'🎶 Reproduciendo ahora: **{self.current_song[guild_id]}**')
                 else:
                      self.logger.warning("Voice client disappeared during play_next")
 
@@ -121,7 +172,7 @@ class MusicManager:
 
         # Add to queue
         queue = self.get_queue(interaction.guild.id)
-        queue.append(url)
+        queue.append({"type": "youtube", "url": url})
         
         # If not playing, start playing
         if not interaction.guild.voice_client.is_playing():
@@ -129,6 +180,22 @@ class MusicManager:
              await interaction.followup.send(f'▶️ Iniciando reproducción...')
         else:
             await interaction.followup.send(f'✅ Añadido a la cola: <{url}>')
+
+    async def play_navidrome_items(self, interaction, songs):
+        if not interaction.guild.voice_client:
+            if not await self.join_voice_channel(interaction):
+                return
+                
+        queue = self.get_queue(interaction.guild.id)
+        for s in songs:
+           queue.append(s)
+           
+        if not interaction.guild.voice_client.is_playing():
+            await self.play_next(interaction.guild, interaction.channel)
+            await interaction.followup.send(f'▶️ Iniciando reproducción de Navidrome...')
+        else:
+            count_str = f"{len(songs)} canciones" if len(songs) > 1 else "1 canción"
+            await interaction.followup.send(f'✅ {count_str} añadida(s) a la cola desde Navidrome.')
 
     async def skip(self, interaction):
         guild = interaction.guild
@@ -191,8 +258,15 @@ class MusicManager:
             return
 
         msg = f"🎶 **Reproduciendo ahora:** {current}\n\n**En cola:**\n"
-        for i, url in enumerate(queue):
-            msg += f"{i+1}. {url}\n"
+        for i, item in enumerate(queue):
+            if isinstance(item, str):
+                title = item
+            else:
+                title = item.get("title", item.get("url", "Unknown"))
+                if item.get("artist") and item.get("artist") != "Unknown Artist":
+                    title = f"{item['artist']} - {title}"
+            
+            msg += f"{i+1}. {title}\n"
             if i >= 9:
                 msg += "... y más"
                 break
