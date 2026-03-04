@@ -95,6 +95,7 @@ class MusicManager:
         self.play_history = {} # guild_id -> list of song dicts
         self.is_radio_mode = {} # guild_id -> bool
         self.radio_played_ids = {} # guild_id -> set
+        self.is_fetching = {} # guild_id -> bool
 
     def cog_unload(self):
         self.check_empty_voice_channels.cancel()
@@ -140,7 +141,11 @@ class MusicManager:
                 await channel.connect()
             return True
         else:
-            await interaction.response.send_message("¡Necesitas estar en un canal de voz para que pueda poner música!", ephemeral=True)
+            msg = "¡Necesitas estar en un canal de voz para que pueda poner música!"
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return False
 
     async def play_next(self, guild, channel):
@@ -156,19 +161,20 @@ class MusicManager:
             self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
 
         if len(queue) >= 1:
-            item = queue.pop(0)
-            
-            # Record in play history
-            if guild_id not in self.play_history:
-                self.play_history[guild_id] = []
-            self.play_history[guild_id].append(item)
-            if len(self.play_history[guild_id]) > 5:
-                self.play_history[guild_id].pop(0)
-                
-            if isinstance(item, str):
-                item = {"type": "youtube", "url": item}
-                
+            self.is_fetching[guild_id] = True
             try:
+                item = queue.pop(0)
+                
+                # Record in play history
+                if guild_id not in self.play_history:
+                    self.play_history[guild_id] = []
+                self.play_history[guild_id].append(item)
+                if len(self.play_history[guild_id]) > 5:
+                    self.play_history[guild_id].pop(0)
+                    
+                if isinstance(item, str):
+                    item = {"type": "youtube", "url": item}
+                    
                 if item.get("type") == "navidrome":
                     stream_url = item["url"]
                     title = item.get("title", "Navidrome Stream")
@@ -181,24 +187,33 @@ class MusicManager:
                     player = await YTDLSource.from_url(item["url"], loop=self.bot.loop, stream=True)
                     
                 if guild.voice_client:
-                    guild.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(guild, channel)))
-                    self.current_song[guild_id] = getattr(player, 'title', item.get("title", "Unknown"))
-                    
-                    if item.get("type") == "navidrome" and item.get("cover_url"):
-                        embed = discord.Embed(title="🎶 Reproduciendo ahora", description=f"**{self.current_song[guild_id]}**", color=discord.Color.blue())
-                        embed.set_thumbnail(url=item["cover_url"])
-                        embed.set_footer(text="Hakkurei Music")
-                        await channel.send(embed=embed)
+                    # Esperamos a que termine de conectarse si estaba reintentando por error 4017
+                    wait_time = 0
+                    while guild.voice_client and getattr(guild.voice_client, "is_connected", lambda: False)() == False and wait_time < 30:
+                        await asyncio.sleep(1)
+                        wait_time += 1
+                        
+                    if getattr(guild.voice_client, "is_connected", lambda: False)():
+                        guild.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(guild, channel)))
+                        self.current_song[guild_id] = getattr(player, 'title', item.get("title", "Unknown"))
+                        
+                        if item.get("type") == "navidrome" and item.get("cover_url"):
+                            embed = discord.Embed(title="🎶 Reproduciendo ahora", description=f"**{self.current_song[guild_id]}**", color=discord.Color.blue())
+                            embed.set_thumbnail(url=item["cover_url"])
+                            embed.set_footer(text="Hakkurei Music")
+                            await channel.send(embed=embed)
+                        else:
+                            await channel.send(f'🎶 Reproduciendo ahora: **{self.current_song[guild_id]}**')
                     else:
-                        await channel.send(f'🎶 Reproduciendo ahora: **{self.current_song[guild_id]}**')
-                else:
-                     self.logger.warning("Voice client disappeared during play_next")
-
+                        self.logger.warning("Voice client disappeared or failed to connect during play_next.")
+                        raise Exception("No se pudo establecer o mantener la conexión de voz.")
             except Exception as e:
                 self.logger.error(f"Error reproduciendo música: {e}")
-                await channel.send(f"Ocurrió un error al intentar reproducir la canción: {str(e)}")
+                await channel.send(f"Ocurrió un error al intentar reproducir la canción o conectarse al canal de voz: {str(e)}")
                 # Try next one
                 await self.play_next(guild, channel)
+            finally:
+                self.is_fetching[guild_id] = False
         else:
             self.current_song[guild_id] = None
 
@@ -240,13 +255,14 @@ class MusicManager:
         await channel.send(f"📻 *Radio: Añadidas {added_count} canciones en la cola.*")
 
     async def play(self, interaction, url):
+        # Defer response first since extracting/connecting takes time
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+            
         # Join channel if not already in one
         if not interaction.guild.voice_client:
             if not await self.join_voice_channel(interaction):
                 return
-        
-        # Defer response as extracting info takes time
-        await interaction.response.defer()
 
         # Disable radio mode for manual plays
         self.is_radio_mode[interaction.guild.id] = False
@@ -258,13 +274,16 @@ class MusicManager:
         queue.append({"type": "youtube", "url": url})
         
         # If not playing, start playing
-        if not interaction.guild.voice_client.is_playing():
+        if not interaction.guild.voice_client.is_playing() and not self.is_fetching.get(interaction.guild.id, False):
              await self.play_next(interaction.guild, interaction.channel)
              await interaction.followup.send(f'▶️ Iniciando reproducción...')
         else:
             await interaction.followup.send(f'✅ Añadido a la cola: <{url}>')
 
     async def play_navidrome_items(self, interaction, songs):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+            
         if not interaction.guild.voice_client:
             if not await self.join_voice_channel(interaction):
                 return
@@ -273,7 +292,7 @@ class MusicManager:
         for s in songs:
            queue.append(s)
            
-        if not interaction.guild.voice_client.is_playing():
+        if not interaction.guild.voice_client.is_playing() and not self.is_fetching.get(interaction.guild.id, False):
             await self.play_next(interaction.guild, interaction.channel)
             await interaction.followup.send(f'▶️ Iniciando reproducción de Navidrome...')
         else:
