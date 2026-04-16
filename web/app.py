@@ -13,8 +13,7 @@ templates = Jinja2Templates(directory="web/templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "config": config.config
     })
 
@@ -87,8 +86,7 @@ async def list_memories(request: Request):
     # Ordenar por fecha reciente
     memories.sort(key=lambda x: x["date"], reverse=True)
     
-    return templates.TemplateResponse("memories.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "memories.html", {
         "memories": memories
     })
 
@@ -104,8 +102,7 @@ async def view_memory(request: Request, user_id: str):
     except Exception as e:
         content = f"Error leyendo memoria: {str(e)}"
             
-    return templates.TemplateResponse("memory_view.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "memory_view.html", {
         "user_id": user_id,
         "content": content
     })
