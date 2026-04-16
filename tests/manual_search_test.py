@@ -17,7 +17,7 @@ async def test_search():
     print(f"Pregunta: {question}")
     
     # Simulamos una interacción directa
-    # Nota: analyze_interaction llama a _generate_with_zhipu con enable_search=True
+    # Nota: analyze_interaction llama a _generate_with_nanogpt con enable_search=True
     response = await brain.analyze_interaction(
         user_text=question,
         user_id="test_user",

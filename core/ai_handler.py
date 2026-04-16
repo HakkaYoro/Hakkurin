@@ -56,11 +56,11 @@ class GeminiBrain:
         self.gemma_tokens_this_minute = 0
         self.gemma_last_reset = 0
         
-        # Zhipu AI Client
-        self.zhipu_client = None
+        # NanoGPT Client
+        self.nanogpt_client = None
         
         self._initialize_client()
-        self._initialize_zhipu_client()
+        self._initialize_nanogpt_client()
 
     def _get_usage(self, index):
         if index not in self.key_usage:
@@ -74,24 +74,23 @@ class GeminiBrain:
         self.current_key_index = 0
         self.client = None
         self._initialize_client()
-        self._initialize_zhipu_client()
+        self._initialize_nanogpt_client()
 
-    def _initialize_zhipu_client(self):
-        zhipu_key = config.get("zhipu_api_key")
-        if zhipu_key:
+    def _initialize_nanogpt_client(self):
+        nanogpt_key = config.get("nanogpt_api_key")
+        if nanogpt_key:
             try:
-                # Usar OpenAI client compatible con Zhipu AI (Endpoint personalizado del usuario)
-                self.zhipu_client = OpenAI(
-                    api_key=zhipu_key,
-                    base_url="https://api.z.ai/api/coding/paas/v4" 
+                self.nanogpt_client = OpenAI(
+                    api_key=nanogpt_key,
+                    base_url="https://nano-gpt.com/api/v1" 
                 )
-                print("Cliente ZhipuAI (vía OpenAI SDK) inicializado.")
+                print("Cliente NanoGPT (vía OpenAI SDK) inicializado.")
             except Exception as e:
-                print(f"Error inicializando ZhipuAI: {e}")
-                self.zhipu_client = None
+                print(f"Error inicializando NanoGPT: {e}")
+                self.nanogpt_client = None
         else:
-            print("No se encontró API Key de ZhipuAI. Se usará solo Gemini.")
-            self.zhipu_client = None
+            print("No se encontró API Key de NanoGPT. Se usará solo Gemini.")
+            self.nanogpt_client = None
 
     def _initialize_client(self):
         if not self.keys:
@@ -188,15 +187,15 @@ class GeminiBrain:
             print(f"❌ Excepción en búsqueda DDG: {e}")
             return f"Error al buscar: {e}"
 
-    async def _generate_with_zhipu(self, system_prompt, user_prompt, is_json=False, image_data=None, enable_search=False):
-        """Genera respuesta usando ZhipuAI (GLM-4.7) vía OpenAI SDK."""
-        if not self.zhipu_client:
+    async def _generate_with_nanogpt(self, system_prompt, user_prompt, is_json=False, image_data=None, enable_search=False):
+        """Genera respuesta usando NanoGPT vía OpenAI SDK."""
+        if not self.nanogpt_client:
             return None
             
         import base64
         import asyncio
         
-        model = "glm-4.7"
+        model = "zai-org/glm-5"
         messages = []
         
         # System Prompt
@@ -216,7 +215,7 @@ class GeminiBrain:
         # User Content
         user_content = []
         if image_data:
-            model = "glm-4.6v" # Usar modelo de visión específico (glm-4.6v)
+            model = "google/gemma-4-26b-a4b-it" # Modelo de visión vía NanoGPT
             base64_image = base64.b64encode(image_data).decode('utf-8')
             user_content.append({
                 "type": "text",
@@ -256,7 +255,7 @@ class GeminiBrain:
             })
 
         try:
-            print(f"🤖 Intentando generar con ZhipuAI ({model}) [OpenAI SDK + Manual RAG]...")
+            print(f"🤖 Intentando generar con NanoGPT ({model})...")
             
             # Primera llamada: Ver si quiere usar herramientas
             kwargs = {
@@ -272,13 +271,9 @@ class GeminiBrain:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
 
-            # Solo GLM-4.7 soporta el parámetro de thinking (razonamiento)
-            if model == "glm-4.7":
-                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-
             # Ejecutar llamada inicial
             response = await asyncio.to_thread(
-                self.zhipu_client.chat.completions.create,
+                self.nanogpt_client.chat.completions.create,
                 **kwargs
             )
             
@@ -317,7 +312,7 @@ class GeminiBrain:
                     del kwargs["tool_choice"]
                     
                 final_response = await asyncio.to_thread(
-                    self.zhipu_client.chat.completions.create,
+                    self.nanogpt_client.chat.completions.create,
                     **kwargs
                 )
                 content = final_response.choices[0].message.content
@@ -336,7 +331,7 @@ class GeminiBrain:
             return content
 
         except Exception as e:
-            print(f"❌ Error con ZhipuAI: {e}")
+            print(f"❌ Error con NanoGPT: {e}")
             return None
 
     async def _generate_with_retry(self, prompt, config_gen, is_json=False, force_model=None):
@@ -526,7 +521,7 @@ class GeminiBrain:
             if summary.strip():
                 profiles_text += f"--- PERFIL DE USUARIO ID {uid} ---\n{summary}\n"
 
-        # Gestión de Tokens (Límite 200k tokens ~ 800,000 caracteres para GLM-4.7)
+        # Gestión de Tokens (Límite ~800,000 caracteres)
         # Prioridad: System Prompt > Perfiles > Mensaje Actual > Historial Reciente
         MAX_TOTAL_CHARS = 800000
         
@@ -628,20 +623,18 @@ REGLAS DE COMPORTAMIENTO:
         if image_data and image_mime_type:
             contents.append(types.Part.from_bytes(data=image_data, mime_type=image_mime_type))
 
-        # 1. Intentar con ZhipuAI (GLM-4) como primario
-        if self.zhipu_client:
-            # Pasamos todo el text_prompt como user_prompt para mantener el contexto completo
-            # No pasamos system_prompt separado porque ya está incluido en text_prompt
-            zhipu_result = await self._generate_with_zhipu(
+        # 1. Intentar con NanoGPT como primario
+        if self.nanogpt_client:
+            nanogpt_result = await self._generate_with_nanogpt(
                 system_prompt=None, 
                 user_prompt=text_prompt, 
                 is_json=True, 
                 image_data=image_data,
-                enable_search=True # Habilitar búsqueda web
+                enable_search=True
             )
-            if zhipu_result:
-                return zhipu_result
-            print("⚠️ Falló ZhipuAI, haciendo fallback a Gemini...")
+            if nanogpt_result:
+                return nanogpt_result
+            print("⚠️ Falló NanoGPT, haciendo fallback a Gemini...")
 
         # 2. Fallback a Gemini (Sistema Original)
         result = await self._generate_with_retry(contents, config_gen, is_json=True)
@@ -681,16 +674,16 @@ Solo el texto del mensaje.
             top_k=40
         )
 
-        # 1. Intentar con ZhipuAI
-        if self.zhipu_client:
-            zhipu_result = await self._generate_with_zhipu(
+        # 1. Intentar con NanoGPT
+        if self.nanogpt_client:
+            nanogpt_result = await self._generate_with_nanogpt(
                 system_prompt=None,
                 user_prompt=prompt,
                 is_json=False
             )
-            if zhipu_result:
-                return zhipu_result
-            print("⚠️ Falló ZhipuAI en Holiday Greeting, haciendo fallback a Gemini...")
+            if nanogpt_result:
+                return nanogpt_result
+            print("⚠️ Falló NanoGPT en Holiday Greeting, haciendo fallback a Gemini...")
 
         result = await self._generate_with_retry(prompt, config_gen, is_json=False)
         return result if result else f"feliz {holiday_name} supongo..."
@@ -796,21 +789,18 @@ Solo el texto del nuevo resumen.
             top_k=40
         )
 
-        # 1. Intentar con ZhipuAI
-        if self.zhipu_client:
-            # Para resúmenes, el prompt ya incluye todo el contexto
-            zhipu_result = await self._generate_with_zhipu(
+        # 1. Intentar con NanoGPT
+        if self.nanogpt_client:
+            nanogpt_result = await self._generate_with_nanogpt(
                 system_prompt=None,
                 user_prompt=prompt,
                 is_json=False
             )
-            if zhipu_result:
-                # Zhipu a veces devuelve markdown extra, limpiamos si es necesario
-                if "```json" in zhipu_result and user_id == "hakkurin_internal_self":
-                     # Si es self-memory, esperamos JSON en una parte
+            if nanogpt_result:
+                if "```json" in nanogpt_result and user_id == "hakkurin_internal_self":
                      pass 
-                return zhipu_result
-            print("⚠️ Falló ZhipuAI en Summary, haciendo fallback a Gemini...")
+                return nanogpt_result
+            print("⚠️ Falló NanoGPT en Summary, haciendo fallback a Gemini...")
 
         result = await self._generate_with_retry(prompt, config_gen, is_json=False, force_model=model_name)
         

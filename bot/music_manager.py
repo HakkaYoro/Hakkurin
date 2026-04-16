@@ -157,8 +157,14 @@ class MusicManager:
             self.skip_votes[guild_id].clear()
 
         # Infinite Radio Logic
-        if self.is_radio_mode.get(guild_id, False) and len(queue) <= 1:
-            self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
+        if self.is_radio_mode.get(guild_id, False):
+            if len(queue) == 0:
+                # Queue empty - await new songs before continuing
+                await self._auto_queue_radio(guild_id, channel)
+                queue = self.get_queue(guild_id)
+            elif len(queue) <= 2:
+                # Queue running low - pre-fetch in background
+                self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
 
         if len(queue) >= 1:
             self.is_fetching[guild_id] = True
@@ -194,7 +200,7 @@ class MusicManager:
                         wait_time += 1
                         
                     if getattr(guild.voice_client, "is_connected", lambda: False)():
-                        guild.voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(guild, channel)))
+                        guild.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild, channel), self.bot.loop))
                         self.current_song[guild_id] = getattr(player, 'title', item.get("title", "Unknown"))
                         
                         if item.get("type") == "navidrome" and item.get("cover_url"):
@@ -225,6 +231,9 @@ class MusicManager:
         songs = await navidrome_client.get_similar_songs(navidrome_ids, count=10)
         
         if not songs:
+            songs = await navidrome_client.get_random_songs(count=10)
+        
+        if not songs:
             return
             
         queue = self.get_queue(guild_id)
@@ -247,12 +256,25 @@ class MusicManager:
                 "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
            })
            added_count += 1
-           
+        
+        # Si todas las canciones ya fueron reproducidas, resetear y obtener aleatorias
         if added_count == 0:
-            return
-            
-        guild_id = guild_id # To satisfy linter/avoid breaking indentation simply
-        await channel.send(f"📻 *Radio: Añadidas {added_count} canciones en la cola.*")
+            self.radio_played_ids[guild_id].clear()
+            random_songs = await navidrome_client.get_random_songs(count=10)
+            for song in random_songs:
+                self.radio_played_ids[guild_id].add(song["id"])
+                queue.append({
+                    "type": "navidrome",
+                    "url": navidrome_client.get_stream_url(song["id"]),
+                    "id": song["id"],
+                    "title": song.get("title", "Unknown"),
+                    "artist": song.get("artist", "Unknown"),
+                    "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
+                })
+                added_count += 1
+           
+        if added_count > 0:
+            await channel.send(f"📻 *Radio: Añadidas {added_count} canciones en la cola.*")
 
     async def play(self, interaction, url):
         # Defer response first since extracting/connecting takes time
