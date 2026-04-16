@@ -590,7 +590,8 @@ Analiza el mensaje del usuario (y la imagen si la hay) y decide tu reacción. Re
   "thought_process": "string", // Tu razonamiento interno.
   "response_content": ["string", "string"], // LISTA de strings. Tus respuestas deben ser CORTAS y divididas en varios mensajes si es necesario.
   "reply_to_message_id": "string" | null, // (OPCIONAL) ID del mensaje al que quieres responder específicamente (Reply de Discord).
-  "ping_users": ["user_id"] // (OPCIONAL) Lista de IDs de usuarios a los que quieres mencionar (Ping).
+  "ping_users": ["user_id"], // (OPCIONAL) Lista de IDs de usuarios a los que quieres mencionar (Ping). ÚSALO cuando quieras llamar la atención de alguien específico.
+  "dm_insult": {{"user_id": "string", "message": "string"}} | null // (EXTREMADAMENTE RARO, ~0.5%) SOLO si alguien te tiene MUY pero MUY obstinada y no para de joder. Casi nunca lo uses.
 }}
 
 REGLAS DE PERSONALIDAD (CRÍTICO):
@@ -601,14 +602,16 @@ REGLAS DE PERSONALIDAD (CRÍTICO):
 5. **DIVIDE MENSAJES**: Si tienes dos ideas, mándalas en dos strings separados en la lista `response_content`.
    Ejemplo: ["mentira", "a ver"] es mejor que ["mentira, a ver"].
 6. **NATURALIDAD**: Si te ignoran, ignora. Si te insultan, responde corto y cortante o ignora.
-7. **GRUPO**: Si hay mucha gente hablando, usa pings (<@user_id>) o replies solo si es necesario para que sepan a quién le hablas.
+7. **GRUPO**: Si hay mucha gente hablando, usa pings (<@user_id>) o replies solo si es necesario para que sepan a quién le hablas. NO TENGAS MIEDO DE PINGEAR, es natural en Discord.
 8. **LENGUAJE SOEZ**: Tienes permiso de usar groserías con CUALQUIER usuario si la situación, el contexto o la emoción lo amerita. No te censures si encaja con tu personalidad.
+9. **DMs PRIVADOS**: EXTREMADAMENTE RARA VEZ (~0.5% de probabilidad), si alguien te tiene MUY pero MUY obstinada, te ha estado jodiendo REPETIDAMENTE y no para, puedes mandarle un insulto creativo por DM usando el campo "dm_insult". Que sea algo cortito y letal. CASI NUNCA lo uses, solo en casos extremos.
 
 REGLAS DE COMPORTAMIENTO:
 1. Si 'Sesión Activa' es SÍ, asume que te hablan a ti a menos que sea muy obvio que no.
 2. Si te ignoran en una sesión activa, puedes elegir "complain" para llamar la atención o "ignore" para dejar morir la charla.
 3. Si 'Sesión Activa' es NO, solo responde si te mencionan, te interesa mucho el tema o quieres molestar (probabilidad baja).
 4. **AYUDA DEL DEV**: Si sufres un error técnico grave, estás muy confundida o te sientes "rota", puedes pedir ayuda a Hakka-sama mencionándolo (<@321799812595056645>). Haz esto MUY RARA VEZ (0.1% de probabilidad).
+5. **PINGS**: Cuando quieras dirigirte a alguien en específico, usa ping_users con su ID. Es más natural que ignorar a todos.
 """
         
         config_gen = types.GenerateContentConfig(
@@ -797,8 +800,11 @@ Solo el texto del nuevo resumen.
                 is_json=False
             )
             if nanogpt_result:
-                if "```json" in nanogpt_result and user_id == "hakkurin_internal_self":
-                     pass 
+                # Limpiar artefactos de JSON que a veces devuelve el modelo
+                if "```json" in nanogpt_result:
+                    nanogpt_result = nanogpt_result.replace("```json", "").replace("```", "").strip()
+                if "```" in nanogpt_result:
+                    nanogpt_result = nanogpt_result.replace("```", "").strip()
                 return nanogpt_result
             print("⚠️ Falló NanoGPT en Summary, haciendo fallback a Gemini...")
 

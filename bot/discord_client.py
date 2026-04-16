@@ -373,19 +373,25 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
 
     async def process_with_debounce(self, message, session, key):
         try:
-            # Esperar 3 segundos (Cooldown solicitado)
-            await asyncio.sleep(3)
+            # Esperar 5 segundos (Cooldown para ahorrar requests de NanoGPT)
+            await asyncio.sleep(5)
             
             # Verificar si alguien está escribiendo en el canal
             channel_id = message.channel.id
             if channel_id in self.typing_users and self.typing_users[channel_id]:
-                # Si hay alguien escribiendo, esperamos un poco más (máximo 5s extra)
-                # para ver si completan su idea y no interrumpir.
+                # Si hay alguien escribiendo, esperamos un poco más (máximo 8s extra)
+                # para dar tiempo a que terminen de escribir.
                 print(f"Detectado typing en {channel_id}, esperando...")
-                for _ in range(5):
+                for _ in range(8):
                     if not self.typing_users.get(channel_id):
                         break
                     await asyncio.sleep(1)
+            
+            # Segunda verificación: si TODAVÍA están escribiendo, cancelar
+            # Esto evita enviar requests a NanoGPT que serán desperdiciadas
+            if channel_id in self.typing_users and self.typing_users[channel_id]:
+                print(f"Aún hay typing en {channel_id} después de espera. Cancelando para no desperdiciar request.")
+                return
             
             # Procesar
             await self.process_smart_response(message, session)
@@ -596,6 +602,21 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             print(f"Error crítico detectado en análisis de IA. Activando modo sueño de emergencia.")
             await self.update_bot_status("dnd", "Error Crítico")
             await self.enter_sleep_mode(message.channel)
+        
+        # Manejo de DM insults (muy raro, decorativo)
+        dm_insult = analysis.get("dm_insult")
+        if dm_insult and isinstance(dm_insult, dict):
+            target_uid = dm_insult.get("user_id")
+            dm_msg = dm_insult.get("message")
+            if target_uid and dm_msg:
+                try:
+                    target_user = await self.fetch_user(int(target_uid))
+                    if target_user:
+                        dm_channel = await target_user.create_dm()
+                        await dm_channel.send(dm_msg)
+                        print(f"[DM INSULT] Enviado a {target_uid}: {dm_msg}")
+                except Exception as e:
+                    print(f"[DM INSULT] Error enviando DM a {target_uid}: {e}")
 
     async def save_interaction(self, user_id, user_name, content, is_bot=False):
         """Guarda una interacción en la memoria a largo plazo."""
@@ -698,7 +719,7 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         """Procesa la cola de memoria temporal cada minuto."""
         try:
             # 1. Mover items viejos (>5min) a permanente
-            # Esto retorna usuarios que cumplieron criterio en add_interaction (20 msgs o >6h al momento de insertar)
+            # Esto retorna usuarios que cumplieron criterio en add_interaction (20 msgs o >30 min desde último resumen)
             users_to_summarize = set(await asyncio.to_thread(memory.process_queue))
             
             # 2. Revisar usuarios que NO han hablado recientemente pero tienen buffer viejo (>6h)
