@@ -1,19 +1,29 @@
 import os
 import json
+import time
 from cryptography.fernet import Fernet
 
 MEMORY_DIR = "data/memory/users"
 KEY_FILE = "data/memory/secret.key"
+SUMMARY_DIR = "data/memory/summaries"
 
 class MemoryManager:
+    QUEUE_FILE = "data/memory/queue.json"
+    QUEUE_TO_PERMANENT_DELAY_SECONDS = 300
+    STALE_BUFFER_SECONDS = 1800
+    SUMMARY_TRIGGER_SECONDS = 1800
+    SUMMARY_TRIGGER_INTERACTIONS = 20
+    QUEUE_DUPLICATE_WINDOW_SECONDS = 10
+
     def __init__(self):
         self._ensure_directories()
         self.key = self._load_or_create_key()
         self.cipher = Fernet(self.key)
 
     def _ensure_directories(self):
-        if not os.path.exists(MEMORY_DIR):
-            os.makedirs(MEMORY_DIR)
+        os.makedirs(MEMORY_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
+        os.makedirs(SUMMARY_DIR, exist_ok=True)
 
     def _load_or_create_key(self):
         if os.path.exists(KEY_FILE):
@@ -21,14 +31,89 @@ class MemoryManager:
                 return f.read()
         else:
             key = Fernet.generate_key()
-            # Asegurar que el directorio padre existe
-            os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
             with open(KEY_FILE, "wb") as f:
                 f.write(key)
             return key
 
+    def _atomic_write_bytes(self, path, data_bytes):
+        temp_path = f"{path}.tmp"
+        with open(temp_path, "wb") as f:
+            f.write(data_bytes)
+        os.replace(temp_path, path)
+
+    def _atomic_write_text(self, path, content):
+        temp_path = f"{path}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(temp_path, path)
+
     def _get_file_path(self, user_id):
-        return os.path.join(MEMORY_DIR, f"{user_id}.enc")
+        return os.path.join(MEMORY_DIR, f"{self._sanitize_user_id(user_id)}.enc")
+
+    def _sanitize_user_id(self, user_id):
+        return str(user_id).strip()
+
+    def _normalize_memory_schema(self, mem):
+        """Ajusta memorias antiguas o parciales sin romper compatibilidad."""
+        if not isinstance(mem, dict):
+            mem = {}
+
+        normalized = self._create_empty_memory()
+        normalized.update(mem)
+
+        profile = normalized.get("profile")
+        if not isinstance(profile, dict):
+            profile = {}
+        profile_defaults = self._create_empty_memory()["profile"]
+        safe_profile = dict(profile_defaults)
+        for key in profile_defaults:
+            value = profile.get(key, profile_defaults[key])
+            if key in ["personality_traits", "likes", "dislikes"]:
+                if isinstance(value, list):
+                    safe_profile[key] = [str(v) for v in value if isinstance(v, (str, int, float))]
+                else:
+                    safe_profile[key] = []
+            else:
+                safe_profile[key] = str(value) if value is not None else profile_defaults[key]
+        normalized["profile"] = safe_profile
+
+        if not isinstance(normalized.get("interaction_count"), int):
+            normalized["interaction_count"] = 0
+
+        if not isinstance(normalized.get("last_topics"), list):
+            normalized["last_topics"] = []
+
+        if not isinstance(normalized.get("notes"), str):
+            normalized["notes"] = "Usuario nuevo."
+
+        if not isinstance(normalized.get("summary"), str):
+            normalized["summary"] = ""
+
+        if not isinstance(normalized.get("history_buffer"), list):
+            normalized["history_buffer"] = []
+        else:
+            normalized["history_buffer"] = [
+                str(item)
+                for item in normalized["history_buffer"]
+                if isinstance(item, (str, int, float))
+            ]
+
+        last_summary_time = normalized.get("last_summary_time", 0)
+        try:
+            normalized["last_summary_time"] = float(last_summary_time)
+        except (TypeError, ValueError):
+            normalized["last_summary_time"] = 0
+
+        last_channel_id = normalized.get("last_channel_id")
+        if last_channel_id is not None:
+            try:
+                normalized["last_channel_id"] = int(last_channel_id)
+            except (TypeError, ValueError):
+                normalized["last_channel_id"] = None
+        else:
+            normalized["last_channel_id"] = None
+
+        return normalized
 
     def get_memory(self, user_id):
         """Recupera la memoria desencriptada de un usuario."""
@@ -40,7 +125,8 @@ class MemoryManager:
             with open(file_path, "rb") as f:
                 encrypted_data = f.read()
             decrypted_data = self.cipher.decrypt(encrypted_data)
-            return json.loads(decrypted_data.decode('utf-8'))
+            raw_data = json.loads(decrypted_data.decode('utf-8'))
+            return self._normalize_memory_schema(raw_data)
         except Exception as e:
             print(f"Error leyendo memoria de {user_id}: {e}")
             return self._create_empty_memory()
@@ -49,10 +135,10 @@ class MemoryManager:
         """Encripta y guarda la memoria de un usuario."""
         file_path = self._get_file_path(user_id)
         try:
-            json_data = json.dumps(memory_data, ensure_ascii=False)
+            normalized = self._normalize_memory_schema(memory_data)
+            json_data = json.dumps(normalized, ensure_ascii=False)
             encrypted_data = self.cipher.encrypt(json_data.encode('utf-8'))
-            with open(file_path, "wb") as f:
-                f.write(encrypted_data)
+            self._atomic_write_bytes(file_path, encrypted_data)
         except Exception as e:
             print(f"Error guardando memoria de {user_id}: {e}")
 
@@ -68,52 +154,51 @@ class MemoryManager:
             "interaction_count": 0,
             "last_topics": [],
             "notes": "Usuario nuevo.",
-            "summary": "", # Resumen a largo plazo generado por IA
-            "history_buffer": [] # Buffer de mensajes recientes para el próximo resumen
+            "summary": "",
+            "history_buffer": [],
+            "last_summary_time": 0,
+            "last_channel_id": None
         }
 
     def add_interaction(self, user_id, interaction_text):
         """Añade una interacción al buffer y devuelve True si es hora de resumir (cada 3h)."""
-        import time
+        if interaction_text is None:
+            return False
+        interaction_text = str(interaction_text).strip()
+        if not interaction_text:
+            return False
+
         mem = self.get_memory(user_id)
-        
-        # Asegurar que existan los campos nuevos en memorias viejas
-        if "history_buffer" not in mem: mem["history_buffer"] = []
-        if "summary" not in mem: mem["summary"] = ""
-        if "last_summary_time" not in mem: mem["last_summary_time"] = 0
-        
         mem["history_buffer"].append(interaction_text)
         mem["interaction_count"] += 1
-        
+
         now = time.time()
-        # Resumir si hay 20+ mensajes O si han pasado 30 minutos desde el último resumen
-        # 30 minutos = 1800 segundos
         time_since_last = now - mem.get("last_summary_time", 0)
-        should_summarize = len(mem["history_buffer"]) >= 20 or (len(mem["history_buffer"]) > 0 and time_since_last > 1800)
-        
+        should_summarize = (
+            len(mem["history_buffer"]) >= self.SUMMARY_TRIGGER_INTERACTIONS
+            or (len(mem["history_buffer"]) > 0 and time_since_last > self.SUMMARY_TRIGGER_SECONDS)
+        )
+
         self.save_memory(user_id, mem)
-        
         return should_summarize
 
     def check_stale_buffers(self):
         """Revisa todos los usuarios y devuelve los que tienen mensajes pendientes por > 30 min."""
-        import time
         users = []
         if not os.path.exists(MEMORY_DIR):
             return users
-            
+
         now = time.time()
-        DELAY_30M = 1800
-        
+
         for filename in os.listdir(MEMORY_DIR):
             if filename.endswith(".enc"):
                 user_id = filename.replace(".enc", "")
                 mem = self.get_memory(user_id)
-                
+
                 buffer = mem.get("history_buffer", [])
                 last_sum = mem.get("last_summary_time", 0)
-                
-                if buffer and (now - last_sum > DELAY_30M):
+
+                if buffer and (now - last_sum > self.STALE_BUFFER_SECONDS):
                     users.append(user_id)
         return users
 
@@ -133,30 +218,41 @@ class MemoryManager:
 
     def get_buffer_and_summary(self, user_id):
         mem = self.get_memory(user_id)
-        return mem.get("summary", ""), mem.get("history_buffer", [])
+        return mem.get("summary", ""), list(mem.get("history_buffer", []))
 
-    def update_summary(self, user_id, new_summary):
-        """Actualiza el resumen, limpia el buffer y guarda archivo plano."""
-        import time
+    def update_summary(self, user_id, new_summary, processed_interactions=None):
+        """
+        Actualiza el resumen y limpia solo las interacciones realmente procesadas.
+        Esto evita perder mensajes nuevos que entren mientras la IA resumía.
+        """
         mem = self.get_memory(user_id)
-        mem["summary"] = new_summary
-        mem["history_buffer"] = [] # Limpiar buffer
+        mem["summary"] = str(new_summary) if new_summary is not None else ""
+
+        current_buffer = list(mem.get("history_buffer", []))
+        if processed_interactions is None:
+            mem["history_buffer"] = []
+        else:
+            processed = [str(item) for item in processed_interactions]
+            prefix_len = len(processed)
+            if prefix_len > 0 and current_buffer[:prefix_len] == processed:
+                mem["history_buffer"] = current_buffer[prefix_len:]
+            elif prefix_len == 0:
+                mem["history_buffer"] = current_buffer
+            else:
+                # Si no coincide el prefijo, conservamos el buffer completo para no perder datos.
+                mem["history_buffer"] = current_buffer
+
         mem["last_summary_time"] = time.time()
         self.save_memory(user_id, mem)
-        
+
         # Guardar copia plana del resumen
-        self._save_summary_plaintext(user_id, new_summary)
+        self._save_summary_plaintext(user_id, mem["summary"])
 
     def _save_summary_plaintext(self, user_id, summary_text):
         """Guarda el resumen en un archivo de texto plano visible."""
-        SUMMARY_DIR = "data/memory/summaries"
-        if not os.path.exists(SUMMARY_DIR):
-            os.makedirs(SUMMARY_DIR)
-            
         file_path = os.path.join(SUMMARY_DIR, f"{user_id}.txt")
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(summary_text)
+            self._atomic_write_text(file_path, str(summary_text) if summary_text is not None else "")
         except Exception as e:
             print(f"Error guardando resumen plano de {user_id}: {e}")
 
@@ -165,7 +261,7 @@ class MemoryManager:
         users = []
         if not os.path.exists(MEMORY_DIR):
             return users
-            
+
         for filename in os.listdir(MEMORY_DIR):
             if filename.endswith(".enc"):
                 user_id = filename.replace(".enc", "")
@@ -180,28 +276,31 @@ class MemoryManager:
         profile = mem.get("profile", {})
         notes = mem.get("notes", "")
         summary = mem.get("summary", "")
-        
+
         # Construir el texto que verá la IA
         final_text = f"Notas Básicas: {notes}\n"
         if summary:
             final_text += f"RESUMEN DETALLADO A LARGO PLAZO:\n{summary}\n"
-        
+
         # Inyectar memoria temporal (Cola)
         queued_msgs = self.get_queued_interactions(user_id)
         if queued_msgs:
             final_text += f"MEMORIA RECIENTE (No procesada):\n" + "\n".join(queued_msgs) + "\n"
-        
+
         if profile.get("name"):
             final_text += f"Nombre: {profile['name']}\n"
         if profile.get("likes"):
             final_text += f"Gustos: {', '.join(profile['likes'])}\n"
-        
+
         return final_text
 
     def update_last_channel(self, user_id, channel_id):
         """Actualiza el último canal donde se vio al usuario."""
         mem = self.get_memory(user_id)
-        mem["last_channel_id"] = channel_id
+        try:
+            mem["last_channel_id"] = int(channel_id)
+        except (TypeError, ValueError):
+            mem["last_channel_id"] = None
         self.save_memory(user_id, mem)
 
     def get_all_users_data(self):
@@ -212,7 +311,7 @@ class MemoryManager:
         users_data = []
         if not os.path.exists(MEMORY_DIR):
             return users_data
-            
+
         for filename in os.listdir(MEMORY_DIR):
             if filename.endswith(".enc"):
                 user_id = filename.replace(".enc", "")
@@ -224,39 +323,88 @@ class MemoryManager:
                 })
         return users_data
 
-    # --- MEMORIA TEMPORAL (QUEUE) ---
-    QUEUE_FILE = "data/memory/queue.json"
+    def _normalize_queue_item(self, item):
+        if not isinstance(item, dict):
+            return None
+        user_id = item.get("user_id")
+        text = item.get("text")
+        timestamp = item.get("timestamp")
+
+        if user_id is None or text is None:
+            return None
+
+        user_id = str(user_id).strip()
+        text = str(text).strip()
+        if not user_id or not text:
+            return None
+
+        try:
+            timestamp = float(timestamp)
+        except (TypeError, ValueError):
+            timestamp = time.time()
+
+        return {
+            "user_id": user_id,
+            "text": text,
+            "timestamp": timestamp
+        }
 
     def _load_queue(self):
         if os.path.exists(self.QUEUE_FILE):
             try:
                 with open(self.QUEUE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except:
+                    raw_queue = json.load(f)
+                if not isinstance(raw_queue, list):
+                    return []
+                normalized = []
+                for item in raw_queue:
+                    safe_item = self._normalize_queue_item(item)
+                    if safe_item:
+                        normalized.append(safe_item)
+                return normalized
+            except Exception:
                 return []
         return []
 
     def _save_queue(self, queue_data):
-        # Asegurar directorio
         os.makedirs(os.path.dirname(self.QUEUE_FILE), exist_ok=True)
-        with open(self.QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(queue_data, f, ensure_ascii=False, indent=2)
+        safe_queue = []
+        for item in queue_data:
+            safe_item = self._normalize_queue_item(item)
+            if safe_item:
+                safe_queue.append(safe_item)
+
+        temp_path = f"{self.QUEUE_FILE}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(safe_queue, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, self.QUEUE_FILE)
 
     def add_to_queue(self, user_id, text):
         """Añade una interacción a la cola temporal."""
-        import time
+        if text is None:
+            return
+
+        text = str(text).strip()
+        user_id = self._sanitize_user_id(user_id)
+        if not text or not user_id:
+            return
+
         queue = self._load_queue()
-        queue.append({
-            "user_id": str(user_id),
-            "text": text,
-            "timestamp": time.time()
-        })
+        now = time.time()
+
+        # Dedupe rápida: evita duplicados inmediatos por reintentos/cancelaciones.
+        for item in reversed(queue[-50:]):
+            if item.get("user_id") == user_id and item.get("text") == text:
+                if now - item.get("timestamp", 0) <= self.QUEUE_DUPLICATE_WINDOW_SECONDS:
+                    return
+
+        queue.append({"user_id": user_id, "text": text, "timestamp": now})
         self._save_queue(queue)
 
     def get_queued_interactions(self, user_id):
         """Recupera interacciones recientes de la cola para este usuario."""
         queue = self._load_queue()
-        user_id = str(user_id)
+        user_id = self._sanitize_user_id(user_id)
         # Filtrar mensajes de este usuario
         return [item["text"] for item in queue if item.get("user_id") == user_id]
 
@@ -265,19 +413,16 @@ class MemoryManager:
         Mueve items de la cola temporal a la permanente si tienen > 30 min.
         Retorna lista de user_ids que necesitan resumen.
         """
-        import time
         queue = self._load_queue()
-        if not queue: return []
+        if not queue:
+            return []
 
         now = time.time()
         new_queue = []
         users_to_summarize = set()
-        
-        # 5 minutos = 300 segundos (Antes 30 min)
-        DELAY_SECONDS = 300 
 
         for item in queue:
-            if now - item["timestamp"] > DELAY_SECONDS:
+            if now - item["timestamp"] > self.QUEUE_TO_PERMANENT_DELAY_SECONDS:
                 # Mover a memoria permanente
                 user_id = item["user_id"]
                 should_sum = self.add_interaction(user_id, item["text"])
@@ -289,7 +434,7 @@ class MemoryManager:
         
         if len(new_queue) != len(queue):
             self._save_queue(new_queue)
-            
+
         return list(users_to_summarize)
 
 # Instancia global

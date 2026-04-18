@@ -27,7 +27,7 @@ class HakkurinBot(discord.Client):
         self._load_status_messages()
         
         # Cache para evitar repetir acciones muy seguido
-        self.executed_actions_cache = set()
+        self.executed_actions_cache = {}
         
         # Inicializar gestor de música
         self.music_manager = MusicManager(self)
@@ -105,6 +105,8 @@ class HakkurinBot(discord.Client):
     async def check_reminders_task(self):
         """Revisa si hay acciones programadas en la memoria interna."""
         try:
+            import time
+
             # 1. Leer memoria interna
             self_memory_text = memory.get_self_memory()
             if not self_memory_text:
@@ -115,27 +117,44 @@ class HakkurinBot(discord.Client):
             
             # 3. Filtrar las que tocan ahora
             due_actions = scheduler.check_due_actions(actions)
+            if not due_actions:
+                return
+
+            now_ts = time.time()
+            cache_ttl_seconds = 3600
+            self.executed_actions_cache = {
+                key: ts for key, ts in self.executed_actions_cache.items()
+                if now_ts - ts <= cache_ttl_seconds
+            }
+
+            executed_actions = []
             
             for action in due_actions:
                 action_desc = action.get("action_description")
-                trigger_time = action.get("trigger_time")
                 target_user_id = action.get("target_user_id")
-                unique_key = f"{trigger_time}:{action_desc}"
+                unique_key = scheduler.build_action_key(action)
                 
                 # Evitar duplicados recientes
                 if unique_key in self.executed_actions_cache:
                     continue
                 
                 print(f"[SCHEDULER] Ejecutando acción: {action_desc}")
-                self.executed_actions_cache.add(unique_key)
                 
-                # Determinar canal (último conocido o default)
-                channel_id = self.last_active_channel_id
+                # Determinar canal objetivo de forma más precisa
+                channel_id = None
+                if target_user_id and str(target_user_id).isdigit():
+                    target_mem = memory.get_memory(str(target_user_id))
+                    channel_id = target_mem.get("last_channel_id")
+
                 if not channel_id:
-                    # Intentar buscar en memoria de usuarios
+                    channel_id = self.last_active_channel_id
+
+                if not channel_id:
                     users = memory.get_all_users_data()
-                    if users:
-                        channel_id = users[0].get('last_channel_id')
+                    for user_data in users:
+                        if user_data.get('last_channel_id'):
+                            channel_id = user_data.get('last_channel_id')
+                            break
                 
                 if channel_id:
                     channel = self.get_channel(int(channel_id))
@@ -166,11 +185,21 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
 """
                         # Usamos user_context_id para que cargue la memoria de ESE usuario
                         response = await brain.generate_response(prompt, user_context_id, user_name)
+                        if not isinstance(response, str) or not response.strip():
+                            response = f"{ping_str} recordatorio: {action_desc}".strip()
                         
                         await channel.send(response)
+                        self.executed_actions_cache[unique_key] = now_ts
+                        executed_actions.append(action)
                         
                         # Registrar en memoria que lo hicimos
                         memory.log_self_action(f"EJECUTÉ RECORDATORIO: {action_desc} para {user_name}")
+
+            # Eliminar acciones ya ejecutadas del JSON para persistir dedupe entre reinicios
+            if executed_actions:
+                cleaned_summary = scheduler.remove_executed_actions_from_memory(self_memory_text, executed_actions)
+                if cleaned_summary != self_memory_text:
+                    memory.update_summary(memory.BOT_SELF_ID, cleaned_summary, processed_interactions=[])
                         
         except Exception as e:
             print(f"Error en check_reminders_task: {e}")
@@ -694,7 +723,7 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             new_summary = await brain.generate_summary(current_summary, buffer, user_id, model_name=model_name)
             
             if new_summary:
-                memory.update_summary(user_id, new_summary)
+                memory.update_summary(user_id, new_summary, processed_interactions=buffer)
                 print(f"Resumen de memoria actualizado para {user_id}")
         except Exception as e:
             print(f"Error en proceso de resumen: {e}")
