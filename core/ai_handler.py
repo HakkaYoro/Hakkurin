@@ -1,5 +1,6 @@
 import random
 import json
+import re
 import time
 from google import genai
 from google.genai import types
@@ -195,7 +196,7 @@ class GeminiBrain:
         import base64
         import asyncio
         
-        model = "zai-org/glm-5"
+        model = "deepseek/deepseek-v4-flash:thinking"
         messages = []
         
         # System Prompt
@@ -215,7 +216,7 @@ class GeminiBrain:
         # User Content
         user_content = []
         if image_data:
-            model = "google/gemma-4-26b-a4b-it" # Modelo de visión vía NanoGPT
+            model = "Qwen/Qwen3.6-35B-A3B:thinking" # Modelo de visión vía NanoGPT
             base64_image = base64.b64encode(image_data).decode('utf-8')
             user_content.append({
                 "type": "text",
@@ -263,7 +264,7 @@ class GeminiBrain:
                 "messages": messages,
                 "temperature": 0.7,
                 "top_p": 0.7,
-                "max_tokens": 1024,
+                "max_tokens": 4096,
                 "stream": False
             }
             
@@ -319,6 +320,9 @@ class GeminiBrain:
             else:
                 content = response_message.content
             
+            # Filtrar tokens de razonamiento (<think>...</think>) de modelos DeepSeek
+            content = self._strip_reasoning_tokens(content)
+            
             if is_json:
                 # Limpiar markdown si existe
                 if "```json" in content:
@@ -333,6 +337,17 @@ class GeminiBrain:
         except Exception as e:
             print(f"❌ Error con NanoGPT: {e}")
             return None
+
+    @staticmethod
+    def _strip_reasoning_tokens(text):
+        """Elimina bloques <think>...</think> de las respuestas de modelos DeepSeek thinking."""
+        if not text:
+            return text
+        # Eliminar bloques <think>...</think> (incluyendo multilínea)
+        cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        # Eliminar un <think> huérfano sin cierre (respuesta truncada)
+        cleaned = re.sub(r'<think>.*', '', cleaned, flags=re.DOTALL)
+        return cleaned.strip()
 
     async def _generate_with_retry(self, prompt, config_gen, is_json=False, force_model=None):
         """
