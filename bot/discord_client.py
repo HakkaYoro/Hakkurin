@@ -692,8 +692,8 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con √
                 if not msg_text: continue
                 
                 # --- MANEJO DE DM INVISIBLE ---
-                # Extraer cualquier etiqueta [MD:id]mensaje[/MD]
-                dm_matches = re.finditer(r'\[MD:(\d+)\](.*?)\[/MD\]', msg_text, re.IGNORECASE | re.DOTALL)
+                # Extraer cualquier etiqueta [MD:id]mensaje[/MD] o sus variaciones mal cerradas
+                dm_matches = re.finditer(r'\[MD:(\d+)\](.*?)(?:\[/MD\]|/MD\]|\[/MD|$)', msg_text, re.IGNORECASE | re.DOTALL)
                 for dm_match in dm_matches:
                     target_uid = dm_match.group(1)
                     dm_msg = dm_match.group(2).strip()
@@ -701,7 +701,7 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con √
                         pending_dms.append((target_uid, dm_msg))
                 
                 # Quitar las etiquetas del mensaje para el canal p√∫blico de forma invisible
-                msg_text = re.sub(r'\[MD:\d+\].*?\[/MD\]', '', msg_text, flags=re.IGNORECASE | re.DOTALL).strip()
+                msg_text = re.sub(r'\[MD:\d+\].*?(?:\[/MD\]|/MD\]|\[/MD|$)', '', msg_text, flags=re.IGNORECASE | re.DOTALL).strip()
                 
                 # Si result√≥ que el mensaje de respuesta de la IA ERA S√ìLO el DM para esa persona
                 if not msg_text:
