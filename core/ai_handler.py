@@ -843,5 +843,14 @@ Solo el texto del nuevo resumen.
             print(f"Test de API fallido: {e}")
             return False
 
+    async def generate_response(self, prompt, user_context_id="hakkurin_internal_self", user_name="Sistema"):
+        """
+        Generador simple de respuestas directas usando NanoGPT
+        """
+        system_prompt = f"Eres Hakkurin. Debes acatar este recordatorio y generar una respuesta corta y natural según se te pida. Contexto ID: {user_context_id}, Usuario Objetivo: {user_name}"
+        
+        response = await self._generate_with_nanogpt(system_prompt=system_prompt, user_prompt=prompt, is_json=False)
+        return response
+
 # Instancia global
 brain = GeminiBrain()
