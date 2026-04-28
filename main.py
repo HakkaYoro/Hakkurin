@@ -17,6 +17,9 @@ logging.basicConfig(
     ]
 )
 
+logging.getLogger("discord.player").setLevel(logging.WARNING)
+logging.getLogger("discord.voice_state").setLevel(logging.WARNING)
+
 logger = logging.getLogger("Main")
 
 # Cargar variables de entorno si existen

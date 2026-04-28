@@ -477,8 +477,76 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             image_data, image_mime_type = recent_images[-1]
             print(f"Usando imagen del contexto (Total en buffer: {len(recent_images)})")
 
-        # Análisis de IA
         is_dm = isinstance(message.channel, discord.DMChannel)
+
+        # 3. EXTRAER ESTADO DEL REPRODUCTOR DE MÚSICA
+        current_playing = None
+        if not is_dm and message.guild:
+            current_playing = self.music_manager.current_song.get(message.guild.id)
+            
+        # 4. PROCESAR ENLACES EN EL MENSAJE Y THUMBNAILS (yt-dlp básico)
+        import re
+        import urllib.request
+        
+        url_context = None
+        urls = re.findall(r'(https?://\S+)', user_text)
+        if urls:
+            url = urls[0] # Procesar al menos el primer enlace
+            try:
+                import yt_dlp
+                # Opciones muy ligeras, extract_flat=True si no necesitamos mucha info,
+                # pero para descripciones completas en YouTube a veces se necesita download=False
+                ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+                
+                def extract_info():
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        return ydl.extract_info(url, download=False)
+                
+                print(f"[{url}] Scrapeando metadatos del link...")
+                info = await asyncio.wait_for(self.loop.run_in_executor(None, extract_info), timeout=5.0)
+                
+                if info:
+                    title = info.get('title', 'Sin título')
+                    description = info.get('description', '')
+                    if description:
+                        description = description[:500] + '...' if len(description) > 500 else description
+                    url_context = f"Título de la página/enlace: {title}\nResumen: {description}"
+                    
+                    # Intentar obtener thumbnail si no hay una imagen cargada por el usuario
+                    if not image_data and info.get('thumbnail'):
+                        def fetch_thumb():
+                            req = urllib.request.Request(info['thumbnail'], headers={'User-Agent': 'Mozilla/5.0'})
+                            with urllib.request.urlopen(req, timeout=3) as response:
+                                return response.read()
+                        try:
+                            thumb_bytes = await self.loop.run_in_executor(None, fetch_thumb)
+                            image_data = thumb_bytes
+                            image_mime_type = "image/jpeg"
+                            print("→ Thumbnail del enlace extraída como visión multimodal para el bot.")
+                        except Exception as thumb_e:
+                            print(f"Error descargando miniatura: {thumb_e}")
+                            
+            except Exception as e:
+                # Si falla (seguramente porque no es un sitio soportado por yt-dlp) o por timeout
+                try:
+                    def fetch_html():
+                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=3) as response:
+                            return response.read().decode('utf-8', errors='ignore')
+                    
+                    html = await asyncio.wait_for(self.loop.run_in_executor(None, fetch_html), timeout=3.0)
+                    title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+                    desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', html, re.IGNORECASE | re.DOTALL)
+                    
+                    page_title = title_match.group(1).strip() if title_match else 'Sin título'
+                    page_desc = desc_match.group(1).strip() if desc_match else 'Sin descripción extraíble'
+                    if title_match or desc_match:
+                        url_context = f"Título web del enlace: {page_title}\nMetadescripción: {page_desc}"
+                except Exception as ex2:
+                    print(f"Fallo fallback al parsear enlace: {ex2}")
+                    url_context = None
+
+        # Análisis de IA
         
         analysis = await brain.analyze_interaction(
             user_text=user_text,
@@ -489,7 +557,9 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             image_data=image_data,
             image_mime_type=image_mime_type,
             active_user_ids=active_user_ids,
-            is_dm=is_dm
+            is_dm=is_dm,
+            current_playing=current_playing,
+            url_context=url_context
         )
         
         print(f"Análisis para {user_name}: {analysis}")

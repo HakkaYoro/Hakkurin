@@ -139,6 +139,17 @@ class MusicManager:
                 await interaction.guild.voice_client.move_to(channel)
             else:
                 await channel.connect()
+                
+            # Validar explícitamente que el estado de conexión al VC sea exitoso
+            wait_time = 0
+            while interaction.guild.voice_client and getattr(interaction.guild.voice_client, "is_connected", lambda: False)() == False and wait_time < 30:
+                await asyncio.sleep(0.5)
+                wait_time += 1
+
+            # Pequeña pausa para permitir que la conexión UDP y el socket de voz se estabilicen, 
+            # previniendo el efecto de "audio a 2x de velocidad" (desfase/catch-up) al unirse.
+            await asyncio.sleep(1.0)
+            
             return True
         else:
             msg = "¡Necesitas estar en un canal de voz para que pueda poner música!"
@@ -150,25 +161,32 @@ class MusicManager:
 
     async def play_next(self, guild, channel):
         guild_id = guild.id
-        queue = self.get_queue(guild_id)
         
-        # Clear skip votes when song changes
-        if guild_id in self.skip_votes:
-            self.skip_votes[guild_id].clear()
+        if self.is_fetching.get(guild_id, False):
+            return
+            
+        if guild.voice_client and guild.voice_client.is_playing():
+            return
 
-        # Infinite Radio Logic
-        if self.is_radio_mode.get(guild_id, False):
-            if len(queue) == 0:
-                # Queue empty - await new songs before continuing
-                await self._auto_queue_radio(guild_id, channel)
-                queue = self.get_queue(guild_id)
-            elif len(queue) <= 2:
-                # Queue running low - pre-fetch in background
-                self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
+        self.is_fetching[guild_id] = True
+        try:
+            queue = self.get_queue(guild_id)
+            
+            # Clear skip votes when song changes
+            if guild_id in self.skip_votes:
+                self.skip_votes[guild_id].clear()
 
-        if len(queue) >= 1:
-            self.is_fetching[guild_id] = True
-            try:
+            # Infinite Radio Logic
+            if self.is_radio_mode.get(guild_id, False):
+                if len(queue) == 0:
+                    # Queue empty - await new songs before continuing
+                    await self._auto_queue_radio(guild_id, channel)
+                    queue = self.get_queue(guild_id)
+                elif len(queue) <= 2:
+                    # Queue running low - pre-fetch in background
+                    self.bot.loop.create_task(self._auto_queue_radio(guild_id, channel))
+
+            if len(queue) >= 1:
                 item = queue.pop(0)
                 
                 # Record in play history
@@ -200,6 +218,10 @@ class MusicManager:
                         wait_time += 1
                         
                     if getattr(guild.voice_client, "is_connected", lambda: False)():
+                        if guild.voice_client.is_playing():
+                            # Already playing, likely from another task. Stop here and re-queue.
+                            queue.insert(0, item)
+                            return
                         guild.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild, channel), self.bot.loop))
                         self.current_song[guild_id] = getattr(player, 'title', item.get("title", "Unknown"))
                         
@@ -213,15 +235,16 @@ class MusicManager:
                     else:
                         self.logger.warning("Voice client disappeared or failed to connect during play_next.")
                         raise Exception("No se pudo establecer o mantener la conexión de voz.")
-            except Exception as e:
-                self.logger.error(f"Error reproduciendo música: {e}")
-                await channel.send(f"Ocurrió un error al intentar reproducir la canción o conectarse al canal de voz: {str(e)}")
-                # Try next one
-                await self.play_next(guild, channel)
-            finally:
-                self.is_fetching[guild_id] = False
-        else:
-            self.current_song[guild_id] = None
+            else:
+                self.current_song[guild_id] = None
+        except Exception as e:
+            self.logger.error(f"Error reproduciendo música: {e}")
+            await channel.send(f"Ocurrió un error al intentar reproducir la canción o conectarse al canal de voz: {str(e)}")
+            # Try next one by releasing lock and calling play_next again
+            self.is_fetching[guild_id] = False
+            await self.play_next(guild, channel)
+        finally:
+            self.is_fetching[guild_id] = False
 
     async def _auto_queue_radio(self, guild_id, channel):
         from bot.navidrome_client import navidrome_client

@@ -490,7 +490,7 @@ class GeminiBrain:
             return {"intent": "error", "response_content": [f"Error crítico de IA: {last_error}"]}
         return None
 
-    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None, active_user_ids=None, is_dm=False):
+    async def analyze_interaction(self, user_text, user_id, user_name, context_messages=[], is_session_active=False, image_data=None, image_mime_type=None, active_user_ids=None, is_dm=False, current_playing=None, url_context=None):
         """
         Analiza la interacción y decide qué hacer usando una respuesta estructurada en JSON.
         Soporta imágenes (multimodal) y contexto dinámico de usuarios activos.
@@ -583,6 +583,7 @@ TU EDAD: {bot_age_str}
 ESTADO ACTUAL:
 - Sesión Activa: {"SÍ" if is_session_active else "NO"} (Si es SÍ, ya estabas hablando con esta persona).
 - Tipo de Canal: {channel_type_str}
+- Audio/Música sonando ACTUALMENTE en el bot de voz: {current_playing if current_playing else "En silencio / Nada en reproducción"}
 
 DATOS INTERNOS (Tu propia memoria de lo que has hecho/dicho):
 {self_mem}
@@ -596,6 +597,8 @@ MENSAJE ACTUAL:
 Usuario: {user_name} (ID: {user_id})
 Contenido: "{user_text}"
 [IMAGEN ADJUNTA]: {"SÍ" if image_data else "NO"}
+[DATOS DEL ENLACE/URL ADJUNTO AL MENSAJE]:
+{url_context if url_context else 'Ninguno'}
 
 TU TAREA:
 Analiza el mensaje del usuario (y la imagen si la hay) y decide tu reacción. Responde EXCLUSIVAMENTE con un objeto JSON válido con este formato:
