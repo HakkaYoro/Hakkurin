@@ -680,36 +680,67 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
                 for uid in ping_users:
                     ping_text += f"<@{uid}> "
 
+            pending_dms = []
+            
             for i, msg_text in enumerate(response_content):
                 if not msg_text: continue
                 
-                # Añadir pings al primer mensaje
+                # --- MANEJO DE DM INVISIBLE ---
+                # Extraer cualquier etiqueta [MD:id]mensaje[/MD]
+                dm_matches = re.finditer(r'\[MD:(\d+)\](.*?)\[/MD\]', msg_text, re.IGNORECASE | re.DOTALL)
+                for dm_match in dm_matches:
+                    target_uid = dm_match.group(1)
+                    dm_msg = dm_match.group(2).strip()
+                    if target_uid and dm_msg:
+                        pending_dms.append((target_uid, dm_msg))
+                
+                # Quitar las etiquetas del mensaje para el canal público de forma invisible
+                msg_text = re.sub(r'\[MD:\d+\].*?\[/MD\]', '', msg_text, flags=re.IGNORECASE | re.DOTALL).strip()
+                
+                # Si resultó que el mensaje de respuesta de la IA ERA SÓLO el DM para esa persona
+                if not msg_text:
+                    continue
+                
+                # Añadir pings al primer mensaje público
                 if i == 0 and ping_text:
                     msg_text = ping_text + msg_text
 
                 # Calcular tiempo de escritura: ~0.05s por caracter, mínimo 0.5s, máximo 4s
                 typing_time = min(max(len(msg_text) * 0.08, 0.5), 4.0)
                 
-                async with message.channel.typing():
-                    await asyncio.sleep(typing_time)
-                    # Usar referencia solo en el primer mensaje si existe
-                    if i == 0 and reference:
-                        try:
-                            await message.channel.send(msg_text, reference=reference)
-                        except:
-                             await message.channel.send(msg_text) # Fallback si el mensaje se borró
-                    else:
-                        await message.channel.send(msg_text)
+                try:
+                    async with message.channel.typing():
+                        await asyncio.sleep(typing_time)
+                        # Usar referencia solo en el primer mensaje si existe
+                        if i == 0 and reference:
+                            try:
+                                await message.channel.send(msg_text, reference=reference)
+                            except discord.NotFound:
+                                 await message.channel.send(msg_text) # Fallback si el mensaje se borró
+                        else:
+                            await message.channel.send(msg_text)
+                except discord.errors.DiscordServerError as dse:
+                    print(f"Error 5xx de Discord enviando respuesta al canal: {dse}. Ignorando.")
+                except Exception as e:
+                     print(f"Error inesperado enviando respuesta: {e}")
 
-                    # VERBOSE LOGGING FOR DMs (OUTPUT)
-                    if isinstance(message.channel, discord.DMChannel):
-                        print(f"\n[DM OUTPUT] Para: {user_name} (ID: {user_id})")
-                        print(f"[DM OUTPUT] Contenido: {msg_text}")
-                        print("-" * 30)
+                # VERBOSE LOGGING FOR DMs (OUTPUT)
+                if isinstance(message.channel, discord.DMChannel):
+                    print(f"\n[DM OUTPUT] Para: {user_name} (ID: {user_id})")
+                    print(f"[DM OUTPUT] Contenido: {msg_text}")
+                    print("-" * 30)
                 
                 full_response_text += msg_text + " "
                 # Pequeña pausa entre mensajes
                 await asyncio.sleep(random.uniform(0.2, 0.5))
+                
+            # --- PROCESAR MENSAJES DIRECTOS CON RETRASO ---
+            if pending_dms:
+                async def send_delayed_dms(dms_to_send):
+                    await asyncio.sleep(3.0) # Esperar 3 segundos después de responder en el canal
+                    for t_uid, t_msg in dms_to_send:
+                        await self.send_stealth_dm(message, t_uid, t_msg)
+                asyncio.create_task(send_delayed_dms(pending_dms))
             
             # Añadir respuesta completa al contexto GLOBAL
             channel_ctx = conversation_manager.get_channel_context(message.channel.id)
@@ -738,21 +769,30 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
             print(f"Error crítico detectado en análisis de IA. Activando modo sueño de emergencia.")
             await self.update_bot_status("dnd", "Error Crítico")
             await self.enter_sleep_mode(message.channel)
-        
-        # Manejo de DM insults (muy raro, decorativo)
-        dm_insult = analysis.get("dm_insult")
-        if dm_insult and isinstance(dm_insult, dict):
-            target_uid = dm_insult.get("user_id")
-            dm_msg = dm_insult.get("message")
-            if target_uid and dm_msg:
-                try:
-                    target_user = await self.fetch_user(int(target_uid))
-                    if target_user:
-                        dm_channel = await target_user.create_dm()
-                        await dm_channel.send(dm_msg)
-                        print(f"[DM INSULT] Enviado a {target_uid}: {dm_msg}")
-                except Exception as e:
-                    print(f"[DM INSULT] Error enviando DM a {target_uid}: {e}")
+            
+    async def send_stealth_dm(self, message_ctx, target_uid, dm_msg):
+        """Intenta enviar un MD de manera silenciosa detectado en un bloque [MD][/MD]"""
+        try:
+            target_obj = None
+            if message_ctx.guild:
+                target_obj = message_ctx.guild.get_member(int(target_uid))
+                if not target_obj:
+                    try:
+                        target_obj = await message_ctx.guild.fetch_member(int(target_uid))
+                    except Exception:
+                        pass
+            
+            # Si no es miembro del server actual o estamos en MD, usar usuario global
+            if not target_obj:
+                target_obj = await self.fetch_user(int(target_uid))
+                
+            if target_obj:
+                await target_obj.send(dm_msg)
+                print(f"[MD OCULTO] Enviado exitosamente a {target_uid}: {dm_msg}")
+        except discord.Forbidden as f:
+            print(f"[MD OCULTO] 403 Forbidden enviando a {target_uid}. El usuario cerró sus DMs o no comparten server (Error: {f})")
+        except Exception as e:
+            print(f"[MD OCULTO] Error interno enviando a {target_uid}: {e}")
 
     async def save_interaction(self, user_id, user_name, content, is_bot=False):
         """Guarda una interacción en la memoria a largo plazo."""

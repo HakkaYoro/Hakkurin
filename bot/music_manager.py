@@ -203,9 +203,15 @@ class MusicManager:
                     stream_url = item["url"]
                     title = item.get("title", "Navidrome Stream")
                     artist = item.get("artist", "Unknown Artist")
+                    album = item.get("album", "Unknown Album")
                     
                     audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(stream_url, **ffmpeg_options), volume=0.5)
-                    audio_source.title = f"{artist} - {title}" if artist != "Unknown Artist" else title
+                    
+                    song_info = f"{artist} - {title}" if artist != "Unknown Artist" else title
+                    if album != "Unknown Album":
+                        song_info += f" (Álbum: {album})"
+                    
+                    audio_source.title = song_info
                     player = audio_source
                 else:
                     player = await YTDLSource.from_url(item["url"], loop=self.bot.loop, stream=True)
@@ -276,6 +282,7 @@ class MusicManager:
                 "id": song["id"],
                 "title": song.get("title", "Unknown"),
                 "artist": song.get("artist", "Unknown"),
+                "album": song.get("album", "Unknown Album"),
                 "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
            })
            added_count += 1
@@ -292,6 +299,7 @@ class MusicManager:
                     "id": song["id"],
                     "title": song.get("title", "Unknown"),
                     "artist": song.get("artist", "Unknown"),
+                    "album": song.get("album", "Unknown Album"),
                     "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
                 })
                 added_count += 1
