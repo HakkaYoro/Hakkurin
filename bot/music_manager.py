@@ -96,6 +96,8 @@ class MusicManager:
         self.is_radio_mode = {} # guild_id -> bool
         self.radio_played_ids = {} # guild_id -> set
         self.is_fetching = {} # guild_id -> bool
+        self.current_artist = {} # guild_id -> artist name
+        self.current_album = {} # guild_id -> album name
 
     def cog_unload(self):
         self.check_empty_voice_channels.cancel()
@@ -207,11 +209,14 @@ class MusicManager:
                     
                     audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(stream_url, **ffmpeg_options), volume=0.5)
                     
-                    song_info = f"{artist} - {title}" if artist != "Unknown Artist" else title
-                    if album != "Unknown Album":
-                        song_info += f" (Álbum: {album})"
+                    # Display title (SIN álbum, para mensajes públicos de Discord)
+                    display_title = f"{artist} - {title}" if artist != "Unknown Artist" else title
+                    audio_source.title = display_title
                     
-                    audio_source.title = song_info
+                    # Guardar artista y álbum para el LLM
+                    self.current_artist[guild_id] = artist
+                    self.current_album[guild_id] = album
+                    
                     player = audio_source
                 else:
                     player = await YTDLSource.from_url(item["url"], loop=self.bot.loop, stream=True)

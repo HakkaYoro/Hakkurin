@@ -36,6 +36,7 @@ class NavidromeSearchView(discord.ui.View):
             "id": song["id"],
             "title": song.get("title", "Unknown"),
             "artist": song.get("artist", "Unknown"),
+            "album": song.get("album", "Unknown Album"),
             "cover_url": navidrome_client.get_cover_url(song.get("coverArt"))
         }
 

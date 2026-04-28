@@ -482,7 +482,13 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         # 3. EXTRAER ESTADO DEL REPRODUCTOR DE MÚSICA
         current_playing = None
         if not is_dm and message.guild:
-            current_playing = self.music_manager.current_song.get(message.guild.id)
+            song_title = self.music_manager.current_song.get(message.guild.id)
+            if song_title:
+                album = self.music_manager.current_album.get(message.guild.id, "")
+                if album and album != "Unknown Album":
+                    current_playing = f"{song_title} | Álbum: {album}"
+                else:
+                    current_playing = song_title
             
         # 4. PROCESAR ENLACES EN EL MENSAJE Y THUMBNAILS (yt-dlp básico)
         import re
