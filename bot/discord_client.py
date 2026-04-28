@@ -487,64 +487,101 @@ NOTA: Debes mencionar al usuario {ping_str} si corresponde. Usa tu memoria con �
         # 4. PROCESAR ENLACES EN EL MENSAJE Y THUMBNAILS (yt-dlp básico)
         import re
         import urllib.request
+        import json
         
         url_context = None
         urls = re.findall(r'(https?://\S+)', user_text)
         if urls:
             url = urls[0] # Procesar al menos el primer enlace
-            try:
-                import yt_dlp
-                # Opciones muy ligeras, extract_flat=True si no necesitamos mucha info,
-                # pero para descripciones completas en YouTube a veces se necesita download=False
-                ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
-                
-                def extract_info():
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        return ydl.extract_info(url, download=False)
-                
-                print(f"[{url}] Scrapeando metadatos del link...")
-                info = await asyncio.wait_for(self.loop.run_in_executor(None, extract_info), timeout=5.0)
-                
-                if info:
-                    title = info.get('title', 'Sin título')
-                    description = info.get('description', '')
-                    if description:
-                        description = description[:500] + '...' if len(description) > 500 else description
-                    url_context = f"Título de la página/enlace: {title}\nResumen: {description}"
-                    
-                    # Intentar obtener thumbnail si no hay una imagen cargada por el usuario
-                    if not image_data and info.get('thumbnail'):
-                        def fetch_thumb():
-                            req = urllib.request.Request(info['thumbnail'], headers={'User-Agent': 'Mozilla/5.0'})
+            
+            # YouTube Fallback sin Cookies (oEmbed / Direct Thumbnail)
+            is_youtube = 'youtube.com' in url or 'youtu.be' in url
+            if is_youtube and not image_data:
+                video_id_match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', url)
+                if video_id_match:
+                    video_id = video_id_match.group(1)
+                    oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+                    try:
+                        def fetch_oembed():
+                            req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
                             with urllib.request.urlopen(req, timeout=3) as response:
-                                return response.read()
-                        try:
-                            thumb_bytes = await self.loop.run_in_executor(None, fetch_thumb)
-                            image_data = thumb_bytes
-                            image_mime_type = "image/jpeg"
-                            print("→ Thumbnail del enlace extraída como visión multimodal para el bot.")
-                        except Exception as thumb_e:
-                            print(f"Error descargando miniatura: {thumb_e}")
+                                return json.loads(response.read().decode('utf-8'))
+                        
+                        info = await asyncio.wait_for(self.loop.run_in_executor(None, fetch_oembed), timeout=4.0)
+                        if info:
+                            title = info.get('title', 'Video de YouTube')
+                            author = info.get('author_name', 'Autor Desconocido')
+                            url_context = f"Título del video de YouTube: {title}\nCanal/Autor: {author}"
                             
-            except Exception as e:
-                # Si falla (seguramente porque no es un sitio soportado por yt-dlp) o por timeout
+                            # Obtener imagen usando URL predecible de ytimg (menos baneos que oEmbed a veces o igual de bueno)
+                            thumb_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+                            def fetch_thumb():
+                                req = urllib.request.Request(thumb_url, headers={'User-Agent': 'Mozilla/5.0'})
+                                with urllib.request.urlopen(req, timeout=3) as response:
+                                    return response.read()
+                            try:
+                                image_data = await self.loop.run_in_executor(None, fetch_thumb)
+                                image_mime_type = "image/jpeg"
+                                print("→ Thumbnail de YouTube extraída sin cookies para visión.")
+                            except Exception as e:
+                                print(f"Error descargando miniatura genérica ytimg: {e}")
+                    except Exception as e:
+                        print(f"Error oEmbed fallback para yt: {e}")
+
+            if not url_context: # Si no era youtube, o el oEmbed falló
                 try:
-                    def fetch_html():
-                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(req, timeout=3) as response:
-                            return response.read().decode('utf-8', errors='ignore')
+                    import yt_dlp
+                    # Opciones muy ligeras, extract_flat=True si no necesitamos mucha info,
+                    # pero para descripciones completas en YouTube a veces se necesita download=False
+                    ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
                     
-                    html = await asyncio.wait_for(self.loop.run_in_executor(None, fetch_html), timeout=3.0)
-                    title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
-                    desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', html, re.IGNORECASE | re.DOTALL)
+                    def extract_info():
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            return ydl.extract_info(url, download=False)
                     
-                    page_title = title_match.group(1).strip() if title_match else 'Sin título'
-                    page_desc = desc_match.group(1).strip() if desc_match else 'Sin descripción extraíble'
-                    if title_match or desc_match:
-                        url_context = f"Título web del enlace: {page_title}\nMetadescripción: {page_desc}"
-                except Exception as ex2:
-                    print(f"Fallo fallback al parsear enlace: {ex2}")
-                    url_context = None
+                    print(f"[{url}] Scrapeando metadatos del link...")
+                    info = await asyncio.wait_for(self.loop.run_in_executor(None, extract_info), timeout=5.0)
+                    
+                    if info:
+                        title = info.get('title', 'Sin título')
+                        description = info.get('description', '')
+                        if description:
+                            description = description[:500] + '...' if len(description) > 500 else description
+                        url_context = f"Título de la página/enlace: {title}\nResumen: {description}"
+                        
+                        # Intentar obtener thumbnail si no hay una imagen cargada por el usuario
+                        if not image_data and info.get('thumbnail'):
+                            def fetch_thumb():
+                                req = urllib.request.Request(info['thumbnail'], headers={'User-Agent': 'Mozilla/5.0'})
+                                with urllib.request.urlopen(req, timeout=3) as response:
+                                    return response.read()
+                            try:
+                                thumb_bytes = await self.loop.run_in_executor(None, fetch_thumb)
+                                image_data = thumb_bytes
+                                image_mime_type = "image/jpeg"
+                                print("→ Thumbnail del enlace extraída como visión multimodal para el bot.")
+                            except Exception as thumb_e:
+                                print(f"Error descargando miniatura: {thumb_e}")
+                                
+                except Exception as e:
+                    # Si falla (seguramente porque no es un sitio soportado por yt-dlp) o por timeout
+                    try:
+                        def fetch_html():
+                            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                            with urllib.request.urlopen(req, timeout=3) as response:
+                                return response.read().decode('utf-8', errors='ignore')
+                        
+                        html = await asyncio.wait_for(self.loop.run_in_executor(None, fetch_html), timeout=3.0)
+                        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+                        desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', html, re.IGNORECASE | re.DOTALL)
+                        
+                        page_title = title_match.group(1).strip() if title_match else 'Sin título'
+                        page_desc = desc_match.group(1).strip() if desc_match else 'Sin descripción extraíble'
+                        if title_match or desc_match:
+                            url_context = f"Título web del enlace: {page_title}\nMetadescripción: {page_desc}"
+                    except Exception as ex2:
+                        print(f"Fallo fallback al parsear enlace HTML (posible bot protection): {ex2}")
+                        url_context = None
 
         # Análisis de IA
         
