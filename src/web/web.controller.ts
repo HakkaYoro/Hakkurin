@@ -1,10 +1,11 @@
 // Puerto de web/app.py. Dashboard + config + memories + restart, server-rendered.
 // Fix de seguridad vs el original: secretos write-only (no se hace echo de
 // bot_token/gemini_keys/navidrome_password al DOM) y auth guard opt-in.
-import { Body, Controller, Get, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
 import { ConfigService } from '../common/config.service';
 import { BOT_SELF_ID, MemoryService } from '../memory/memory.service';
 import { DiscordService } from '../discord/discord.service';
+import type { AiBrain } from '../ai/ai-brain.interface';
 import { ViewService } from './view.service';
 import { AuthGuard } from './auth.guard';
 
@@ -17,6 +18,7 @@ export class WebController {
     private readonly config: ConfigService,
     private readonly memory: MemoryService,
     private readonly discord: DiscordService,
+    @Inject('AiBrain') private readonly brain: AiBrain,
     private readonly view: ViewService,
   ) {}
 
@@ -56,9 +58,20 @@ export class WebController {
     // Write-only secrets: solo sobrescribir si el campo viene rellenado.
     await this.setIf(body, 'bot_token');
     await this.setIf(body, 'navidrome_password');
+    let keysChanged = false;
     if (typeof body.gemini_keys === 'string' && body.gemini_keys.trim()) {
       const keys = body.gemini_keys.split('\n').map((k: string) => k.trim()).filter(Boolean);
       await this.config.set('gemini_keys', keys);
+      keysChanged = true;
+    }
+    // Si cambiaron las keys, recargar el brain en caliente (sin need de Restart):
+    // el provider cachea las keys en this.keys y sólo reloadConfig() las repuebla.
+    if (keysChanged) {
+      try {
+        await this.brain.reloadConfig();
+      } catch (e) {
+        this.logger.warn(`reload Gemini tras update_config: ${(e as Error).message}`);
+      }
     }
   }
 

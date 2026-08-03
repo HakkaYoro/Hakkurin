@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   GoogleGenAI,
   Type,
@@ -66,7 +66,7 @@ class KeyUsage {
 }
 
 @Injectable()
-export class GeminiProvider implements AiBrain {
+export class GeminiProvider implements AiBrain, OnModuleInit {
   private readonly logger = new Logger(GeminiProvider.name);
   private keys: string[] = [];
   private currentKeyIndex = 0;
@@ -79,8 +79,15 @@ export class GeminiProvider implements AiBrain {
   constructor(
     private readonly config: ConfigService,
     private readonly memory: MemoryService,
-  ) {
-    void this.initialize();
+  ) {}
+
+  // Carga las keys tras la inicialización del módulo (no en el ctor): el ctor
+  // corría ANTES de que ConfigService terminara de leer data/config.json, así que
+  // this.keys quedaba [] y el cliente nunca se creaba hasta un POST /restart.
+  // Await config.load() garantiza que el JSON ya está en memoria.
+  async onModuleInit(): Promise<void> {
+    await this.config.load();
+    await this.reloadConfig();
   }
 
   async reloadConfig(): Promise<void> {
@@ -551,10 +558,15 @@ Solo el texto del nuevo resumen.
 
   // ai_handler.py:832-844
   async testApiConnection(): Promise<boolean> {
+    // Sin keys no hay API que testear (evita además el warn "No hay API Keys" cada
+    // 60s desde recoveryProbe). El bug anterior: devolvía true siempre, incluso
+    // cuando generateWithRetry retornaba null (no lanza) → recoveryProbe creía la
+    // API sana. Ahora false si no hubo respuesta real.
+    if (!this.keys.length) return false;
     try {
       const configGen: GenerateContentConfig = { maxOutputTokens: 5 };
-      await this.generateWithRetry('ping', configGen, false);
-      return true;
+      const result = await this.generateWithRetry('ping', configGen, false);
+      return result != null;
     } catch (e: any) {
       this.logger.warn(`Test de API fallido: ${e.message}`);
       return false;

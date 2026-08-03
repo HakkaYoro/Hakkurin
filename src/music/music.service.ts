@@ -3,14 +3,16 @@
 // y al guard is_fetching (music_manager.py:167-173,236). Volumen inlineVolume 0.5
 // = PCMVolumeTransformer(volume=0.5). YouTube se resuelve vía sidecar yt-dlp
 // (sidecar/extract_server.py); Navidrome trae URL de stream directa.
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'child_process';
+import { setDefaultResultOrder } from 'dns';
 import {
   AudioPlayerStatus,
   type AudioResource,
   createAudioPlayer,
   createAudioResource,
   entersState,
+  generateDependencyReport,
   getVoiceConnection,
   joinVoiceChannel,
   StreamType,
@@ -59,14 +61,25 @@ interface GuildMusicState {
 }
 
 @Injectable()
-export class MusicService {
+export class MusicService implements OnModuleInit {
   private readonly logger = new Logger(MusicService.name);
   private readonly guilds = new Map<string, GuildMusicState>();
+  // @discordjs/voice 0.18 hardcodea createSocket("udp4") → su UDP de voz es ipv4-only.
+  // Si el WS de voz resuelve el endpoint a IPv6, Discord devuelve un endpoint IPv6 y el
+  // socket udp4 no puede hacer IP discovery → nunca llega a Ready (abort a los 30s).
+  // Primario: IPv6 (DNS del sistema). Tras el primer fallo forzamos IPv4 globalmente
+  // (el gateway de Discord tolera IPv4, así que no se revierte).
+  private voiceForceIPv4 = false;
 
   constructor(
     private readonly config: ConfigService,
     private readonly navidrome: NavidromeService,
   ) {}
+
+  onModuleInit(): void {
+    // Diagnóstico one-shot: confirma ffmpeg/opus/encryption disponibles.
+    this.logger.log(`Voice dependency report:\n${generateDependencyReport()}`);
+  }
 
   /**
    * Ocupado = hay player Y su estado no es Idle. Tras player.play() el player pasa
@@ -116,6 +129,50 @@ export class MusicService {
     return (member.voice?.channel as { id: string; guild: { voiceAdapterCreator: any } } | null) ?? null;
   }
 
+  // Log de transiciones de estado + errores de networking del VoiceConnection.
+  // Revela dónde se cuelga el handshake (Connecting → Signalling → ... → Ready).
+  // Idempotente: joinFromButton puede llamarse sobre la MISMA conexión persistente
+  // en cada clic de botón de Navidrome — sin el guard acumularía listeners y
+  // dispararía MaxListenersExceededWarning + logs duplicados.
+  private attachVoiceDiagnostics(connection: VoiceConnection, guildId: string): void {
+    if ((connection as any).__hakDiag) return;
+    (connection as any).__hakDiag = true;
+    connection.on('stateChange', (oldState, newState) =>
+      this.logger.debug(`VC ${guildId}: ${oldState.status} → ${newState.status}`),
+    );
+    connection.on('error', (e) => this.logger.warn(`VC networking ${guildId}: ${e.message}`));
+  }
+
+  // Join con fallback IPv6 → IPv4. Si entersState(Ready) aborta (lo más probable:
+  // endpoint IPv6 inalcanzable por el udp4 hardcoded), forzamos IPv4 y reintentamos.
+  private async joinWithFallback(
+    guildId: string,
+    create: () => VoiceConnection,
+  ): Promise<VoiceConnection | null> {
+    let connection = create();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      this.attachVoiceDiagnostics(connection, guildId);
+      try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+        return connection;
+      } catch (e) {
+        try { connection.destroy(); } catch {}
+        if (!this.voiceForceIPv4) {
+          this.voiceForceIPv4 = true;
+          setDefaultResultOrder('ipv4first');
+          this.logger.warn(
+            `VC ${guildId} falló (${(e as Error).message}). @discordjs/voice usa UDP ipv4-only; forzando IPv4 y reintentando…`,
+          );
+          connection = create();
+          continue;
+        }
+        this.logger.error(`No se pudo conectar al VC ${guildId}: ${(e as Error).message}`);
+        return null;
+      }
+    }
+    return null;
+  }
+
   async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
     const member = interaction.member as GuildMember;
     const vc = this.voiceChannelOf(member);
@@ -123,23 +180,38 @@ export class MusicService {
       await safeFollowup(interaction, '¡Necesitas estar en un canal de voz para que pueda poner música!');
       return false;
     }
-    const s = this.state(interaction.guildId);
-    let connection = getVoiceConnection(interaction.guildId);
-    const fresh = !connection;
-    if (!connection) {
-      connection = joinVoiceChannel({
-        channelId: vc.id,
-        guildId: interaction.guildId,
-        adapterCreator: vc.guild.voiceAdapterCreator,
-        selfDeaf: true,
-      });
-    }
-    try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-    } catch (e) {
-      this.logger.error(`No se pudo conectar al VC: ${(e as Error).message}`);
-      await safeFollowup(interaction, 'No logré conectarme al canal de voz. Intenta de nuevo.');
-      return false;
+    const guildId = interaction.guildId;
+    const s = this.state(guildId);
+
+    // Conexión ya existente: esperar su Ready directo (sin fallback de recreación).
+    const existing = getVoiceConnection(guildId);
+    let connection: VoiceConnection;
+    let fresh: boolean;
+    if (existing) {
+      connection = existing;
+      fresh = false;
+      try {
+        this.attachVoiceDiagnostics(connection, guildId);
+        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+      } catch (e) {
+        this.logger.error(`No se pudo conectar al VC (estado: ${connection.state.status}): ${(e as Error).message}`);
+        await safeFollowup(interaction, 'No logré conectarme al canal de voz (¿UDP/IPv6?). Revisa los logs de MusicService.');
+        return false;
+      }
+    } else {
+      fresh = true;
+      connection = await this.joinWithFallback(guildId, () =>
+        joinVoiceChannel({
+          channelId: vc.id,
+          guildId,
+          adapterCreator: vc.guild.voiceAdapterCreator,
+          selfDeaf: true,
+        }),
+      );
+      if (!connection) {
+        await safeFollowup(interaction, 'No logré conectarme al canal de voz (¿UDP/IPv6?). Revisa los logs de MusicService.');
+        return false;
+      }
     }
     // Pausa breve sólo en conexión fresca para estabilizar el socket de voz
     // (previene audio "a 2x" — discord_client.py:152-153). Re-conectar no la necesita.
@@ -408,20 +480,31 @@ export class MusicService {
     const vc = this.voiceChannelOf(member);
     if (!vc) return false;
     const s = this.state(guild.id);
-    let connection = getVoiceConnection(guild.id);
-    const fresh = !connection;
-    if (!connection) {
-      connection = joinVoiceChannel({
-        channelId: vc.id,
-        guildId: guild.id,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: true,
-      });
-    }
-    try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-    } catch {
-      return false;
+
+    const existing = getVoiceConnection(guild.id);
+    let connection: VoiceConnection;
+    let fresh: boolean;
+    if (existing) {
+      connection = existing;
+      fresh = false;
+      try {
+        this.attachVoiceDiagnostics(connection, guild.id);
+        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+      } catch (e) {
+        this.logger.warn(`joinFromButton VC ${guild.id} falló: ${(e as Error).message}`);
+        return false;
+      }
+    } else {
+      fresh = true;
+      connection = await this.joinWithFallback(guild.id, () =>
+        joinVoiceChannel({
+          channelId: vc.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator,
+          selfDeaf: true,
+        }),
+      );
+      if (!connection) return false;
     }
     if (fresh) await delay(1000); // sólo en conexión fresca (desync 2x)
     s.connection = connection;

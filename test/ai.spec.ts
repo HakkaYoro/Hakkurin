@@ -110,8 +110,21 @@ describe('GeminiProvider (contracto AiBrain)', () => {
     await expect(p2.generateHolidayGreeting('resumen', 'Navidad')).resolves.toContain('supongo');
   });
 
-  it('testApiConnection: true si la llamada no lanza', async () => {
+  it('testApiConnection: true cuando hay respuesta real', async () => {
     const p = makeProvider(jest.fn().mockResolvedValue({ text: 'pong' }));
     await expect(p.testApiConnection()).resolves.toBe(true);
+  });
+
+  it('testApiConnection: false si no hay keys', async () => {
+    const p = makeProvider(jest.fn().mockResolvedValue({ text: 'pong' }));
+    (p as any).keys = [];
+    await expect(p.testApiConnection()).resolves.toBe(false);
+  });
+
+  it('testApiConnection: false si generateWithRetry no devuelve respuesta (regresión del masking bug)', async () => {
+    // 500 (no-cuota) agota los modelos → generateWithRetry retorna null (no lanza).
+    // Antes testApiConnection devolvía true igual → recoveryProbe creía la API sana.
+    const p = makeProvider(jest.fn().mockRejectedValue(new Error('500 internal')));
+    await expect(p.testApiConnection()).resolves.toBe(false);
   });
 });
