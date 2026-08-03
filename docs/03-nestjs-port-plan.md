@@ -29,7 +29,8 @@ gaps del WebUI.
   `AuthGuard` (Basic opt-in), nunjucks con CSS neón, secretos write-only.
 - **Scheduler**: `ActionParserService` (puerto de `core/scheduler.py`) + **6 loops `@Interval(60000)`** alojados
   en `DiscordService` (no existe un `SchedulerModule` separado — eliminado por YAGNI).
-- **Cutover parcial**: `Dockerfile` 2-stage (Node+ffmpeg, sin libsodium), `sidecar/Dockerfile`, `docker-compose.yml`
+- **Cutover parcial**: `Dockerfile` (Node+ffmpeg, con `libsodium-wrappers` y `opusscript`
+  puros JS/WASM para evitar gcc), `sidecar/Dockerfile`, `docker-compose.yml`
   (`:30421→8000`, volumen, sidecar interno), `nest-cli.json` (assets templates), `.dockerignore`, `CLAUDE.md`,
   `README.md`, CI `.github/workflows/docker-publish.yml` scoped **solo a `main`**, `data/config.json.example`.
 
@@ -54,6 +55,7 @@ gaps del WebUI.
    - Stealth DM: `[MD:id]` en una respuesta llega ~3s después como DM.
    - **Voice**: `/play <url>` (sidecar real + ffmpeg + `@discordjs/voice`), voto-skip, `/radio` prefetch, desconexión
      por canal vacío a 300s. Riesgos del plan: bug "audio 2x" al conectar, paridad de volumen `0.5`.
+     - **Fix 4006/4017**: Asegurar uso de `@discordjs/voice@0.19.2` con `@snazzah/davey`, `@noble/ciphers` y `@stablelib/xchacha20poly1305`.
    - **Navidrome real**: search, buttons Components V2, stream/cover (NUNCA loguear las URLs con u/t/s).
    - **Gemma real respondiendo**: que el modelo primario efectivamente contesta y el fallback Gemini entra al agotar keys.
    - `intent:'error'` (agotar todas las keys) → sleep mode, status dnd, recovery probe cada 60s.
@@ -109,9 +111,14 @@ Registro de lo que saltó al correr Hakkurin por primera vez en un servidor real
   aunque el usuario estuviera en un VC. Causa: el `Client` declaraba 7 intents pero **no `GuildVoiceStates`**
   → `member.voice.channel` siempre era `null`. Fix: una línea en `src/discord/discord.service.ts` (añadir
   `GatewayIntentBits.GuildVoiceStates`). La lógica de join de `MusicService` estaba bien.
-- ⏳ **PENDIENTE — verificar el resto de voz en vivo.** Tras el fix del intent, queda por probar en un guild
-  real: `/play <url>` (sidecar + ffmpeg + `@discordjs/voice`), voto-skip, `/radio` prefetch, desconexión por
-  canal vacío a 300s. Riesgos heredados del plan: bug "audio 2x" al conectar, paridad de volumen `inlineVolume:0.5`.
+- ✅ **FIXED — Bug de conexión abortada a 30s.** La causa era que `@discordjs/voice`
+  exige dependencias de cifrado (libsodium) y opus (opusscript) que faltaban en el `package.json`.
+  Instaladas versiones puras JS/WASM para mantener compatibilidad con `node:22-slim` sin `build-essential`.
+  También se refactorizó `joinVoiceChannel` para ser idempotente y reconectar automáticamente
+  estados `Disconnected`.
+- ⏳ **PENDIENTE — Verificar audio real en vivo.** Tras el fix de conexión, probar: `/play <url>`
+  (que el audio de ffmpeg llegue al canal), voto-skip, `/radio` prefetch. Riesgos heredados del
+  plan: bug "audio 2x" al conectar, paridad de volumen `inlineVolume:0.5`.
 - ✅ **Confirmado funcionando:** login del bot, registro de slash commands, pipeline de mensajes completo
   (trigger → debounce → `analyzeInteraction` Gemma → respuesta con delays), auto-memoria (`Resumen de memoria
   actualizado para hakkurin_internal_self`), `POST /restart` (destruye+recarga config+recrea cliente).
@@ -364,6 +371,13 @@ Each phase is shippable and independently verifiable. Order minimizes risk: conf
 - Run NestJS alongside Python (different bot token or same token with queueing disabled) in a staging server; shadow-compare responses.
 - Move `data/status_messages.json` (`discord_client.py:242-249`), `data/holidays.json`, migrated memory dir into the NestJS data layout.
 - Point launch at `nest start` (or Docker — update `docker-compose.yml`, `Dockerfile`, `launch.sh`); remove `main.py`, `bot/`, `core/`, `web/`, `requirements.txt`, `run_tests.py` → `simulate_conversation.py` equivalents live under `test/`.
+
+### 5. Dockerización 🐳
+- Creado `Dockerfile` basado en `node:20-alpine` (WASM + JS fallbacks eliminan necesidad de compilador C++).
+- Creado `docker-compose.yml`.
+
+### Solución de Problemas (Troubleshooting) 🛠️
+- **Error 4006 / 4017 en `@discordjs/voice`**: Discord hizo obligatoria la encriptación DAVE (E2EE) para WebSockets de Voz. La versión `0.18.0` lanzaba `4006` al fallar el protocolo. Actualizar a `@discordjs/voice@0.19.2` e instalar `@snazzah/davey`, `@noble/ciphers` y `@stablelib/xchacha20poly1305` soluciona el problema de handshake.
 
 ---
 

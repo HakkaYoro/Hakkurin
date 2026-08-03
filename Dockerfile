@@ -7,8 +7,10 @@ COPY . .
 RUN npm run build
 
 # ---- runtime: sólo deps de producción + ffmpeg (PCM para @discordjs/voice) ----
-# ponytail: sin libsodium — el port usa node:crypto (AES-256-GCM) y @discordjs/voice
-# trae su cifrado de voz en JS puro. Si voice fallara por encryption, añadir libsodium.
+# ponytail: libsodium-wrappers (WASM) + opusscript (JS puro) — sin compilación
+# nativa, funciona en node:22-slim sin build-essential. Upgrade path: si el
+# rendimiento importa, cambiar a sodium-native + @discordjs/opus (requiere
+# build-essential y python3 en ambos stages o copiar node_modules del build).
 FROM node:22-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \

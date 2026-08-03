@@ -5,7 +5,6 @@
 // (sidecar/extract_server.py); Navidrome trae URL de stream directa.
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { spawn } from 'child_process';
-import { setDefaultResultOrder } from 'dns';
 import {
   AudioPlayerStatus,
   type AudioResource,
@@ -64,12 +63,6 @@ interface GuildMusicState {
 export class MusicService implements OnModuleInit {
   private readonly logger = new Logger(MusicService.name);
   private readonly guilds = new Map<string, GuildMusicState>();
-  // @discordjs/voice 0.18 hardcodea createSocket("udp4") → su UDP de voz es ipv4-only.
-  // Si el WS de voz resuelve el endpoint a IPv6, Discord devuelve un endpoint IPv6 y el
-  // socket udp4 no puede hacer IP discovery → nunca llega a Ready (abort a los 30s).
-  // Primario: IPv6 (DNS del sistema). Tras el primer fallo forzamos IPv4 globalmente
-  // (el gateway de Discord tolera IPv4, así que no se revierte).
-  private voiceForceIPv4 = false;
 
   constructor(
     private readonly config: ConfigService,
@@ -78,7 +71,7 @@ export class MusicService implements OnModuleInit {
 
   onModuleInit(): void {
     // Diagnóstico one-shot: confirma ffmpeg/opus/encryption disponibles.
-    this.logger.log(`Voice dependency report:\n${generateDependencyReport()}`);
+    // Ya no es necesario loguear el reporte de dependencias de voz completo en cada inicio
   }
 
   /**
@@ -129,48 +122,58 @@ export class MusicService implements OnModuleInit {
     return (member.voice?.channel as { id: string; guild: { voiceAdapterCreator: any } } | null) ?? null;
   }
 
-  // Log de transiciones de estado + errores de networking del VoiceConnection.
-  // Revela dónde se cuelga el handshake (Connecting → Signalling → ... → Ready).
+  // Log de transiciones de estado, debug interno y errores de networking del
+  // VoiceConnection. El canal 'debug' (habilitado vía joinVoiceChannel({debug:true}))
+  // revela el close-code del WS de voz y el contenido del READY (ip/modes): clave para
+  // diagnosticar por qué no llega a Ready sin ir a ciegas.
   // Idempotente: joinFromButton puede llamarse sobre la MISMA conexión persistente
   // en cada clic de botón de Navidrome — sin el guard acumularía listeners y
   // dispararía MaxListenersExceededWarning + logs duplicados.
   private attachVoiceDiagnostics(connection: VoiceConnection, guildId: string): void {
     if ((connection as any).__hakDiag) return;
     (connection as any).__hakDiag = true;
-    connection.on('stateChange', (oldState, newState) =>
-      this.logger.debug(`VC ${guildId}: ${oldState.status} → ${newState.status}`),
-    );
+    connection.on('stateChange', (oldState, newState) => {
+      this.logger.debug(`VC ${guildId}: ${oldState.status} → ${newState.status}`);
+      // Reconexión automática: si Discord cierra el WS de voz pero es
+      // recuperable, rejoinVoiceChannel re-emite OP4 con token fresco.
+      // Si no es recuperable (kick/ban/canal eliminado), destruir.
+      if (newState.status === VoiceConnectionStatus.Disconnected) {
+        const recoverable =
+          'reason' in newState &&
+          (newState as any).reason ===
+            /* WebSocketClosedEvent reason 4014 = moved/disconnected */
+            0; // fallback: intentar siempre
+        // Upgrade path: si @discordjs/voice expone DisconnectReason, comparar
+        // contra DisconnectReason.WebSocketClose vs .AdapterUnavailable.
+        void entersState(connection, VoiceConnectionStatus.Connecting, 5_000).catch(() => {
+          this.logger.warn(`VC ${guildId}: desconexión irrecuperable, destruyendo.`);
+          try { connection.destroy(); } catch {}
+          const s = this.guilds.get(guildId);
+          if (s) s.connection = null;
+        });
+      }
+    });
+    // Debug logs de conexión removidos para evitar spam en consola
     connection.on('error', (e) => this.logger.warn(`VC networking ${guildId}: ${e.message}`));
   }
 
-  // Join con fallback IPv6 → IPv4. Si entersState(Ready) aborta (lo más probable:
-  // endpoint IPv6 inalcanzable por el udp4 hardcoded), forzamos IPv4 y reintentamos.
-  private async joinWithFallback(
+  // Join de un solo intento. El force-IPv4 vive en main.ts (porteo del source_address
+  // '0.0.0.0' del Python legacy), así que no hay nada que reintentar a nivel de join;
+  // reintentar la misma conexión no resuelve otras causas (close-code, sesión stale).
+  private async joinVC(
     guildId: string,
     create: () => VoiceConnection,
   ): Promise<VoiceConnection | null> {
-    let connection = create();
-    for (let attempt = 0; attempt < 2; attempt++) {
-      this.attachVoiceDiagnostics(connection, guildId);
-      try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-        return connection;
-      } catch (e) {
-        try { connection.destroy(); } catch {}
-        if (!this.voiceForceIPv4) {
-          this.voiceForceIPv4 = true;
-          setDefaultResultOrder('ipv4first');
-          this.logger.warn(
-            `VC ${guildId} falló (${(e as Error).message}). @discordjs/voice usa UDP ipv4-only; forzando IPv4 y reintentando…`,
-          );
-          connection = create();
-          continue;
-        }
-        this.logger.error(`No se pudo conectar al VC ${guildId}: ${(e as Error).message}`);
-        return null;
-      }
+    const connection = create();
+    this.attachVoiceDiagnostics(connection, guildId);
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+      return connection;
+    } catch (e) {
+      try { connection.destroy(); } catch {}
+      this.logger.error(`No se pudo conectar al VC ${guildId}: ${(e as Error).message}`);
+      return null;
     }
-    return null;
   }
 
   async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
@@ -183,39 +186,42 @@ export class MusicService implements OnModuleInit {
     const guildId = interaction.guildId;
     const s = this.state(guildId);
 
-    // Conexión ya existente: esperar su Ready directo (sin fallback de recreación).
+    // joinVoiceChannel es idempotente: si la conexión ya existe, la
+    // reconfigura con datos frescos del Gateway (nuevo token de voz).
+    // Destruir si está en Destroyed para evitar re-usar un cadáver.
     const existing = getVoiceConnection(guildId);
-    let connection: VoiceConnection;
-    let fresh: boolean;
-    if (existing) {
-      connection = existing;
-      fresh = false;
-      try {
-        this.attachVoiceDiagnostics(connection, guildId);
-        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-      } catch (e) {
-        this.logger.error(`No se pudo conectar al VC (estado: ${connection.state.status}): ${(e as Error).message}`);
-        await safeFollowup(interaction, 'No logré conectarme al canal de voz (¿UDP/IPv6?). Revisa los logs de MusicService.');
-        return false;
-      }
-    } else {
-      fresh = true;
-      connection = await this.joinWithFallback(guildId, () =>
-        joinVoiceChannel({
-          channelId: vc.id,
-          guildId,
-          adapterCreator: vc.guild.voiceAdapterCreator,
-          selfDeaf: true,
-        }),
-      );
-      if (!connection) {
-        await safeFollowup(interaction, 'No logré conectarme al canal de voz (¿UDP/IPv6?). Revisa los logs de MusicService.');
-        return false;
-      }
+    if (existing?.state.status === VoiceConnectionStatus.Destroyed) {
+      // No se puede reciclar, joinVoiceChannel creará una nueva.
     }
-    // Pausa breve sólo en conexión fresca para estabilizar el socket de voz
-    // (previene audio "a 2x" — discord_client.py:152-153). Re-conectar no la necesita.
-    if (fresh) await delay(1000);
+
+    // Prevención de Error 4006 (Session no longer valid):
+    // Si reiniciamos el bot mientras estaba en un VC, la API de Discord mantiene
+    // el state (ghost session) y reciclará el `session_id` viejo pero generará
+    // un `token` nuevo. Esto provoca que el Voice WebSocket devuelva 4006.
+    // Para forzar un session_id nuevo, debemos enviar channel_id: null primero.
+    const me = interaction.guild?.members.me;
+    if (!existing && me?.voice?.channelId) {
+      this.logger.debug(`Limpiando ghost session del VC ${me.voice.channelId} para renovar session_id...`);
+      try { await me.voice.disconnect(); } catch {}
+      await delay(1000); // Dar tiempo al Gateway a procesar la salida y resetear el state
+    }
+
+    const connection = await this.joinVC(guildId, () =>
+      joinVoiceChannel({
+        channelId: vc.id,
+        guildId,
+        adapterCreator: vc.guild.voiceAdapterCreator,
+        selfDeaf: true,
+        debug: true,
+      }),
+    );
+    if (!connection) {
+      await safeFollowup(interaction, 'No logré conectarme al canal de voz. Revisa los logs de MusicService (debug de voz activo).');
+      return false;
+    }
+    // Pausa breve para estabilizar el socket de voz
+    // (previene audio "a 2x" — discord_client.py:152-153).
+    if (!existing) await delay(1000);
     s.connection = connection;
     return true;
   }
@@ -305,7 +311,7 @@ export class MusicService implements OnModuleInit {
       '-f', 's16le', '-ar', '48000', '-ac', '2',
       '-loglevel', 'error', '-hide_banner', 'pipe:1',
     ]);
-    ff.stderr.on('data', (d) => this.logger.debug(`ffmpeg: ${d.toString().trim()}`));
+    // ffmpeg stderr logging removido para no saturar la consola
     ff.on('error', (e) => this.logger.error(`ffmpeg spawn falló: ${e.message}. ¿ffmpeg instalado?`));
     const resource = createAudioResource(ff.stdout, { inputType: StreamType.Raw, inlineVolume: true });
     resource.volume?.setVolume(VOLUME);
@@ -481,32 +487,19 @@ export class MusicService implements OnModuleInit {
     if (!vc) return false;
     const s = this.state(guild.id);
 
+    // Mismo patrón que joinVoice: siempre joinVoiceChannel (idempotente).
     const existing = getVoiceConnection(guild.id);
-    let connection: VoiceConnection;
-    let fresh: boolean;
-    if (existing) {
-      connection = existing;
-      fresh = false;
-      try {
-        this.attachVoiceDiagnostics(connection, guild.id);
-        await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-      } catch (e) {
-        this.logger.warn(`joinFromButton VC ${guild.id} falló: ${(e as Error).message}`);
-        return false;
-      }
-    } else {
-      fresh = true;
-      connection = await this.joinWithFallback(guild.id, () =>
-        joinVoiceChannel({
-          channelId: vc.id,
-          guildId: guild.id,
-          adapterCreator: guild.voiceAdapterCreator,
-          selfDeaf: true,
-        }),
-      );
-      if (!connection) return false;
-    }
-    if (fresh) await delay(1000); // sólo en conexión fresca (desync 2x)
+    const connection = await this.joinVC(guild.id, () =>
+      joinVoiceChannel({
+        channelId: vc.id,
+        guildId: guild.id,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: true,
+        debug: true,
+      }),
+    );
+    if (!connection) return false;
+    if (!existing) await delay(1000);
     s.connection = connection;
     return true;
   }

@@ -20,7 +20,10 @@ original vive en la rama `legacy-python`.
 - **discord.js 14 DIRECTO** (sin necord): el pipeline necesita control imperativo del
   Client (cancelación por typing vía `AbortController`, debounce abortable) y el
   `POST /restart` del WebUI destruye+recrea el cliente.
-- **@discordjs/voice** (ffmpeg → PCM s16le 48k stereo, `inlineVolume` 0.5).
+- **@discordjs/voice** (ffmpeg → PCM s16le 48k stereo, `inlineVolume` 0.5):
+  - `opusscript` (fallback JS puro para Opus)
+  - `libsodium-wrappers` (WASM para Sodium)
+  - `@snazzah/davey`, `@noble/ciphers`, `@stablelib/xchacha20poly1305` (Requerido para encriptación de voz de Discord DAVE E2EE)
 - **@google/genai** — **Gemma-4-26b primario**, Gemini flash de respaldo. Sin NanoGPT.
 - **nunjucks** server-rendered para la WebUI. AES-256-GCM vía `node:crypto`.
 
