@@ -1,0 +1,22 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "30421:8000"
+    volumes:
+      # Volumen único para toda la persistencia (config + memoria + holidays/status)
+      - hakkurin_data:/app/data
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - sidecar
+
+  # Sidecar yt-dlp: interno (no expone puerto al host). El bot lo alcanza en
+  # http://sidecar:7654 — setear ytdl_sidecar_url en la WebUI a ese valor.
+  sidecar:
+    build: ./sidecar
+    restart: unless-stopped
+
+volumes:
+  hakkurin_data:

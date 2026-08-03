@@ -1,0 +1,24 @@
+# Mantener el contexto de build del bot ligero: excluye todo lo que el build
+# Node no necesita (deps instalados vía npm ci, datos en volumen, árbol Python,
+# historial, docs, tests).
+node_modules
+dist
+.git
+.gitignore
+data
+venv
+.venv
+bot
+core
+web
+tools
+test
+docs
+memory.fernet.bak
+memory.fernet.bak.legacy
+.claude
+*.md
+*.log
+Dockerfile
+.dockerignore
+docker-compose.yml

@@ -1,0 +1,16 @@
+{
+  "bot_name": "Hakkurin",
+  "bot_token": "PEGA_AQUI_EL_TOKEN_DE_DISCORD",
+  "gemini_keys": ["PEGA_AQUI_UNA_GEMINI_API_KEY"],
+  "system_prompt": "Eres Hakkurin, una chica usuaria de Discord con una personalidad e-girl, otaku y fujoshi. Te gusta el anime, el manga y usar emoticonos. Eres sarcástica pero amigable si te tratan bien. Si te ignoran, dejas de hablar. Tienes memoria de con quién hablas.",
+  "reply_probability": 0.125,
+  "developer_id": "TU_DISCORD_USER_ID",
+  "allowed_channels": [],
+  "navidrome_base_url": "http://navidrome:4533",
+  "navidrome_external_url": "https://music.ejemplo.com",
+  "navidrome_username": "hakkurin",
+  "navidrome_password": "",
+  "ytdl_sidecar_url": "http://sidecar:7654",
+  "webui_token": "",
+  "debug_dm": false
+}

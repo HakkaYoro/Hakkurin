@@ -1,0 +1,29 @@
+{% extends '_base.html' %}
+{% block title %}Memorias - Hakkurin{% endblock %}
+{% block body %}
+<a href="/" class="back-btn">← Volver al Dashboard</a>
+<h1>Memorias de Usuarios 🧠</h1>
+
+{% if not memories.length %}
+<p style="text-align: center; color: #888;">No hay memorias guardadas aún.</p>
+{% else %}
+<ul class="memory-list">
+    {% for mem in memories %}
+    <li>
+        <a href="/memories/{{ mem.user_id }}">
+            <div class="memory-item{% if mem.is_self %} internal-memory{% endif %}">
+                <span class="user-id">
+                    ID: {{ mem.user_id }}
+                    {% if mem.is_self %}
+                    <span style="background: #ff79c6; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; margin-left: 10px;">🧠
+                        MEMORIA INTERNA</span>
+                    {% endif %}
+                </span>
+                <span class="date">Actualizado: {{ mem.date }}</span>
+            </div>
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

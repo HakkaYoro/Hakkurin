@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "test", "venv", "bot", "core", "web", "sidecar", "*.py"]
+}

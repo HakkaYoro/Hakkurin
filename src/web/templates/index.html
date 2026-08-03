@@ -1,0 +1,117 @@
+{% extends '_base.html' %}
+{% block title %}Hakkurin Control Center{% endblock %}
+{% block body %}
+<h1>Hakkurin Dashboard</h1>
+
+<div id="success-msg" class="alert">¡Configuración guardada exitosamente!</div>
+
+<div style="margin-bottom: 20px;">
+    <a href="/memories" style="text-decoration: none;">
+        <button type="button" style="background: linear-gradient(45deg, #8be9fd, #50fa7b); color: #282a36;">
+            🧠 Ver Memorias de Usuarios
+        </button>
+    </a>
+</div>
+
+<div class="card">
+    <form action="/update_config" method="post">
+        <div class="form-group">
+            <label for="bot_name">Nombre del Bot</label>
+            <input type="text" id="bot_name" name="bot_name" value="{{ bot_name }}">
+        </div>
+
+        <div class="form-group">
+            <label for="bot_token">Discord Bot Token
+                {% if has_bot_token %}<span class="badge-ok">✓ Configurado</span>{% else %}<span class="badge-no">✗ No configurado</span>{% endif %}
+            </label>
+            <input type="password" id="bot_token" name="bot_token" value="" autocomplete="off"
+                placeholder="{% if has_bot_token %}(dejar vacío para mantener el actual){% else %}(pegar token aquí){% endif %}">
+            <div class="hint">Write-only: el valor actual nunca se muestra. Déjalo vacío para conservarlo.</div>
+        </div>
+
+        <div class="form-group">
+            <label for="gemini_keys">Gemini API Keys (una por línea)
+                <span class="badge-ok">{{ gemini_keys_count }} configurada(s)</span>
+            </label>
+            <textarea id="gemini_keys" name="gemini_keys" rows="4"
+                placeholder="{% if gemini_keys_count %}({{ gemini_keys_count }} keys guardadas — escribir solo para reemplazarlas todas){% else %}(una key por línea){% endif %}"></textarea>
+            <div class="hint">Write-only: rellenar reemplaza la lista completa. Vacío = sin cambios.</div>
+        </div>
+
+        <div class="form-group">
+            <label for="navidrome_base_url">Navidrome — URL interna (Subsonic)</label>
+            <input type="text" id="navidrome_base_url" name="navidrome_base_url" value="{{ navidrome_base_url }}"
+                placeholder="http://navidrome:4533">
+        </div>
+
+        <div class="form-group">
+            <label for="navidrome_external_url">Navidrome — URL pública (stream/cover)</label>
+            <input type="text" id="navidrome_external_url" name="navidrome_external_url" value="{{ navidrome_external_url }}"
+                placeholder="https://music.ejemplo.com">
+        </div>
+
+        <div class="form-group">
+            <label for="navidrome_username">Navidrome — Usuario</label>
+            <input type="text" id="navidrome_username" name="navidrome_username" value="{{ navidrome_username }}">
+        </div>
+
+        <div class="form-group">
+            <label for="navidrome_password">Navidrome — Contraseña
+                {% if has_navidrome_password %}<span class="badge-ok">✓ Configurada</span>{% else %}<span class="badge-no">✗ No configurada</span>{% endif %}
+            </label>
+            <input type="password" id="navidrome_password" name="navidrome_password" value="" autocomplete="off"
+                placeholder="{% if has_navidrome_password %}(dejar vacío para mantener la actual){% else %}(contraseña Navidrome){% endif %}">
+        </div>
+
+        <div class="form-group">
+            <label for="ytdl_sidecar_url">URL del sidecar yt-dlp (extracción de YouTube)</label>
+            <input type="text" id="ytdl_sidecar_url" name="ytdl_sidecar_url" value="{{ ytdl_sidecar_url }}"
+                placeholder="http://sidecar:7654 (compose) · http://localhost:7654 (local)">
+            <div class="hint">Dónde corre el contenedor yt-dlp. Vacío = http://localhost:7654 (default).</div>
+        </div>
+
+        <div class="form-group">
+            <label for="reply_probability">Probabilidad de Respuesta (0.0 - 1.0)</label>
+            <input type="number" id="reply_probability" name="reply_probability" step="0.01" min="0" max="1"
+                value="{{ reply_probability }}">
+        </div>
+
+        <div class="form-group">
+            <label for="system_prompt">System Prompt (Personalidad)</label>
+            <textarea id="system_prompt" name="system_prompt" rows="6">{{ system_prompt }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="developer_id">ID de Desarrollador (Discord User ID)</label>
+            <input type="text" id="developer_id" name="developer_id" value="{{ developer_id }}">
+        </div>
+
+        <button type="submit">Guardar Cambios</button>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 20px; border-color: #ff5555;">
+    <h2 style="color: #ff5555;">Zona de Peligro / Control</h2>
+    <form action="/restart" method="post">
+        <p style="text-align: center; color: #aaa;">Reiniciar aplicará cambios, recargará keys/modelos y forzará el
+            resumen de memorias pendientes.</p>
+        <button type="submit" style="background: linear-gradient(45deg, #ff5555, #ffb86c);">⚠️ Reiniciar Bot y Recargar
+            Memorias ⚠️</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('saved') === 'true') {
+        document.getElementById('success-msg').style.display = 'block';
+        window.history.replaceState({}, document.title, "/");
+        setTimeout(() => { document.getElementById('success-msg').style.display = 'none'; }, 3000);
+    }
+    if (urlParams.get('restarted') === 'true') {
+        alert("El bot se está reiniciando. Espera unos segundos.");
+        window.history.replaceState({}, document.title, "/");
+    }
+</script>
+{% endblock %}

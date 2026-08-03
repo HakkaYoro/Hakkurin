@@ -1,0 +1,7 @@
+{% extends '_base.html' %}
+{% block title %}Memoria: {{ user_id }}{% endblock %}
+{% block body %}
+<a href="/memories" class="back-btn">← Volver a la lista</a>
+<h1>Memoria de {{ user_id }}</h1>
+<div class="content-box">{{ content }}</div>
+{% endblock %}

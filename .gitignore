@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+*.log
+config.json
+memory/
+.DS_Store
+
+# Node / NestJS
+node_modules/
+dist/
+*.fernet.bak
+memory.fernet.bak*
