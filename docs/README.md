@@ -1,9 +1,11 @@
 # Hakkurin — Agent Reference Docs
 
-Dense, source-verified reference for AI coding agents. Read these before opening the
-Python source — they cover state, contracts, and algorithms with exact `file:line` refs.
-Language: English. Scope: current Python codebase + the Nest.JS port plan + the
-Google-AI-Studio-only AI migration.
+Dense, source-verified reference for AI coding agents. The runtime is **now NestJS/TypeScript**
+(port complete — see `03-nestjs-port-plan.md §0` for current status). These docs describe the
+**original Python** tree (state, contracts, algorithms with exact `file:line` refs) plus the port
+plan and the Google-AI-Studio-only AI migration. The **authoritative guide to the live code is
+`CLAUDE.md`** at repo root; these docs are the reference for *why* and *what was ported from*.
+Language: English (except `03 §0`, handoff notes in Spanish).
 
 Read in order on first contact:
 
@@ -12,7 +14,7 @@ Read in order on first contact:
 | 00 | [`00-overview.md`](00-overview.md) | What Hakkurin is, tech-stack table, `main.py` entry-point flow, annotated repo tree, run instructions (local + Docker), README staleness. |
 | 01 | [`01-architecture.md`](01-architecture.md) | Module map + LOC, end-to-end message pipeline, event handlers, 6 background tasks, the `analyze_interaction` contract (MUST PRESERVE), ConversationManager, Scheduler, sleep mode, stealth DM. |
 | 02 | [`02-ai-system.md`](02-ai-system.md) | `GeminiBrain` internals — NanoGPT primary + Gemini fallback, multi-key rotation, `web_search` two-pass, intent JSON schema, prompt assembly order, public API. **+ migration to Google AI Studio only.** |
-| 03 | [`03-nestjs-port-plan.md`](03-nestjs-port-plan.md) | Target NestJS module tree, Python→TS framework mapping, stealth-DM regex port, `AiBrain` interface, 7 phased steps, security fixes. |
+| 03 | [`03-nestjs-port-plan.md`](03-nestjs-port-plan.md) | **§0 = port status + what's left (read first).** Then: target NestJS module tree, Python→TS framework mapping, stealth-DM regex port, `AiBrain` interface, 7 phased steps, security fixes. |
 | 04 | [`04-data-security.md`](04-data-security.md) | Config schema, memory schema + Fernet encryption, summarization/queue triggers, scheduler data format, security-debt table, port recommendations. |
 | 05 | [`05-music-system.md`](05-music-system.md) | Slash commands, YouTube (`yt-dlp`) path, Navidrome Subsonic client (MD5 auth), per-guild queue state, `play_next`/radio/vote-skip/empty-VC algorithms, UI views. |
 | 06 | [`06-webui.md`](06-webui.md) | FastAPI routes, config-form→config-key mapping, end-to-end restart mechanism, templates, security notes, NestJS port target. |

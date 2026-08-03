@@ -2,6 +2,104 @@
 
 Concrete plan to rewrite Hakkurin from Python (`discord.py` + FastAPI) to NestJS (TypeScript). Companion to `00-overview.md`, `01-architecture.md`, `02-ai-system.md`, `04-data-security.md`. All `file:line` refs are to the current Python tree unless noted.
 
+> **NOTA DE ESTADO (2026-08-03):** Las secciones `1`–`7` de abajo son el **plan original** (escrito antes de
+> codear). El **estado real actual** vive en la sección `0` inmediatamente debajo, y en `CLAUDE.md` (fuente de
+> verdad del código). Si el plan y la sección `0` discrepan, cree a la sección `0`.
+
+---
+
+## 0. Estado actual del port (lo que está hecho y lo que FALTA)
+
+El runtime NestJS/TypeScript **está implementado** (fases 1–6 + parte de la 7). Verificación offline verde:
+`npx tsc --noEmit` OK, `npx jest` → **61/61 tests**. Lo que queda es **publicar + verificar en vivo** + cerrar
+gaps del WebUI.
+
+### 0.1 Hecho ✅
+
+- **Scaffold** NestJS 11, `ConfigService` (`data/config.json`, escritura atómica temp+rename), `MemoryService`
+  + `CryptoService` (AES-256-GCM por usuario, `BOT_SELF_ID`, cola con dedupe, espejo plano en
+  `data/memory/summaries/`).
+- **AiModule**: `AiBrain` interface + `GeminiProvider` con **Gemma-4-26b primario**, Gemini flash fallback,
+  **sin NanoGPT**. Rotación de keys, RPM/RPD, parseo defensivo de JSON tras fences (Gemma no soporta JSON mode).
+- **DiscordModule**: `DiscordService` (hub + pipeline: debounce 5s abortable vía `AbortController`,
+  typing-await 8s, send con delays de escritura), `StealthDmService`, `SleepService`, `SlashCommands`.
+- **Music + Navidrome + sidecar**: `MusicService` por guild (`@discordjs/voice`, `inlineVolume` 0.5),
+  `NavidromeService` (Subsonic REST, MD5-salt), sidecar `sidecar/extract_server.py` (yt-dlp HTTP `/extract?url=`).
+- **WebModule**: dashboard, `POST /update_config`, `POST /restart`, `GET /memories`, `GET /memories/:user_id`,
+  `AuthGuard` (Basic opt-in), nunjucks con CSS neón, secretos write-only.
+- **Scheduler**: `ActionParserService` (puerto de `core/scheduler.py`) + **6 loops `@Interval(60000)`** alojados
+  en `DiscordService` (no existe un `SchedulerModule` separado — eliminado por YAGNI).
+- **Cutover parcial**: `Dockerfile` 2-stage (Node+ffmpeg, sin libsodium), `sidecar/Dockerfile`, `docker-compose.yml`
+  (`:30421→8000`, volumen, sidecar interno), `nest-cli.json` (assets templates), `.dockerignore`, `CLAUDE.md`,
+  `README.md`, CI `.github/workflows/docker-publish.yml` scoped **solo a `main`**, `data/config.json.example`.
+
+### 0.2 Decisiones del port que DIFIEREN del plan original (1–7)
+
+- **`necord` eliminado** → discord.js 14 **directo**. Motivo: el pipeline necesita control imperativo del Client
+  (cancelación por typing vía `AbortController`, debounce abortable) y el `POST /restart` destruye+recrea el cliente.
+- **`SchedulerModule` eliminado** → los 6 loops viven en `DiscordService` con guards de reentrada (`@Interval`
+  no es secuancial como `@tasks.loop` de discord.py).
+- **Migración Fernet cancelada** → wipe de memoria. La key AES-256-GCM se genera on-first-run. No hay script
+  Fernet→AES (decisión locked del usuario: empezar de cero).
+- **Navidrome creds en `data/config.json`** (no `.env`), scrub del password del historial via `git-filter-repo`.
+
+### 0.3 FALTA por hacer ❌ (handoff para la próxima sesión)
+
+1. **Publicar al remote** — el `force-push` a `main` está bloqueado por el clasificador de auto-mode del agente
+   (detecta "destructive history rewrite"). Lo debe ejecutar el usuario con `!` (ver §0.4). El local ya está listo:
+   `main` es orphan limpio (solo NestJS), `legacy-python` tiene el Python scrubbeado, `nestjs-port` borrado.
+2. **Verificación EN VIVO en servidor real** ⚠️ **LO MÁS IMPORTANTE** — las fases 3 y 4 decían "verify in a
+   test server" y **nunca se hizo** (solo tsc + jest). Cosas que sólo saltan en runtime y hay que probar:
+   - Pipeline real: mention → typing-await → respuesta con delays; mensaje nuevo dentro de 5s cancela el pendiente.
+   - Stealth DM: `[MD:id]` en una respuesta llega ~3s después como DM.
+   - **Voice**: `/play <url>` (sidecar real + ffmpeg + `@discordjs/voice`), voto-skip, `/radio` prefetch, desconexión
+     por canal vacío a 300s. Riesgos del plan: bug "audio 2x" al conectar, paridad de volumen `0.5`.
+   - **Navidrome real**: search, buttons Components V2, stream/cover (NUNCA loguear las URLs con u/t/s).
+   - **Gemma real respondiendo**: que el modelo primario efectivamente contesta y el fallback Gemini entra al agotar keys.
+   - `intent:'error'` (agotar todas las keys) → sleep mode, status dnd, recovery probe cada 60s.
+   - Recordatorio programado vía auto-memoria → dispara en ventana de 10 min y dedupea tras restart.
+3. **Re-verify del compose**: `docker compose up -d --build` levanta `bot` + `sidecar`, WebUI en `:30421`.
+4. **Gaps del WebUI** (pregunta del usuario — ver §0.5 para detalle): `allowed_channels`, `debug_dm`, y edición
+   de memorias NO están hoy en la WebUI.
+
+### 0.4 Comandos para publicar al remote (ejecutar con `!` en la sesión)
+
+El clasificador bloquea que el agente haga `git push --force`. El usuario los corre con prefijo `!`:
+
+```
+! git push --force origin main            # publica el NestJS limpio (sobreescribe el main remoto con password)
+! git push origin legacy-python           # publica el Python scrubbeado como rama legacy
+! git push origin --delete nestjs-port    # borra la rama remota vieja (aún contiene el password)
+```
+
+Tras eso, el password `N2Iiaq.d20l9eoJE` ya no vive en ningún ref del remote. Verificar:
+`! git ls-remote --heads origin` (debe listar solo `main` y `legacy-python`).
+
+### 0.5 ¿Qué es editable / visible desde la WebUI? (pregunta del usuario)
+
+**SÍ editable** vía `POST /update_config` (`src/web/web.controller.ts`): `bot_name`, `system_prompt`,
+`reply_probability`, `developer_id`, `navidrome_{base_url,external_url,username,password}`,
+`ytdl_sidecar_url`, `bot_token` (write-only), `gemini_keys` (write-only, multiline).
+
+**NO editable** hoy (gap — la próxima sesión decide si añadirlos):
+- `allowed_channels[]` — array, el form no lo maneja. Editar directo en `data/config.json`.
+- `debug_dm` (bool) — flag de log de DMs, no está en el form.
+- `webui_token` — es el token que protege el propio form (problema huevo-gallina); si se pierde, se edita en JSON.
+
+**Memorias** — `GET /memories` lista (`.enc` por mtime, marca self) y `GET /memories/:user_id` muestra el
+resumen descifrado. **Son SOLO LECTURA**: no hay edición ni borrado desde la WebUI. Si se quiere editar/borrar
+memorias desde el dashboard, es trabajo nuevo (añadir `POST /memories/:user_id` + form).
+
+### 0.6 Cómo arrancar la próxima sesión
+
+1. `git pull` / confirmar que `main` y `legacy-python` están publicados.
+2. `cp data/config.json.example data/config.json`, rellenar `bot_token` + `gemini_keys` + `navidrome_*`.
+3. Levantar el sidecar: `cd sidecar && pip install -r requirements.txt && uvicorn extract_server:app --port 7654`.
+4. `npm run start:dev` y probar el pipeline real contra un servidor de prueba (§0.3 punto 2).
+5. La fuente de verdad del código es `CLAUDE.md`, no este doc. Restricciones permanentes del usuario: **responder
+   en español**, **Gemma-4-26b primario**, **subagentes Sonnet/Haiku cuando aporten valor**, **Ponytail ultra**
+   (YAGNI extremista, stdlib primero).
+
 ---
 
 ## 1. Target NestJS module structure
