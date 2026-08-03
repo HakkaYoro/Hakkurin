@@ -102,6 +102,7 @@ export class DiscordService implements OnModuleInit, OnModuleDestroy {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessageTyping,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates, // sin este intent member.voice.channel es siempre null
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.DirectMessageTyping,
       ],

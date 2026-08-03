@@ -100,6 +100,25 @@ memorias desde el dashboard, es trabajo nuevo (añadir `POST /memories/:user_id`
    en español**, **Gemma-4-26b primario**, **subagentes Sonnet/Haiku cuando aporten valor**, **Ponytail ultra**
    (YAGNI extremista, stdlib primero).
 
+### 0.7 Bugs cazados en el primer arranque en vivo (2026-08-03)
+
+Registro de lo que saltó al correr Hakkurin por primera vez en un servidor real (todo lo de §0.3 era
+"verificar en vivo" — esto es el resultado parcial de esa verificación).
+
+- ✅ **FIXED — Intent de voz faltante.** Síntoma: `/play` respondía "¡Necesitas estar en un canal de voz…"
+  aunque el usuario estuviera en un VC. Causa: el `Client` declaraba 7 intents pero **no `GuildVoiceStates`**
+  → `member.voice.channel` siempre era `null`. Fix: una línea en `src/discord/discord.service.ts` (añadir
+  `GatewayIntentBits.GuildVoiceStates`). La lógica de join de `MusicService` estaba bien.
+- ⏳ **PENDIENTE — verificar el resto de voz en vivo.** Tras el fix del intent, queda por probar en un guild
+  real: `/play <url>` (sidecar + ffmpeg + `@discordjs/voice`), voto-skip, `/radio` prefetch, desconexión por
+  canal vacío a 300s. Riesgos heredados del plan: bug "audio 2x" al conectar, paridad de volumen `inlineVolume:0.5`.
+- ✅ **Confirmado funcionando:** login del bot, registro de slash commands, pipeline de mensajes completo
+  (trigger → debounce → `analyzeInteraction` Gemma → respuesta con delays), auto-memoria (`Resumen de memoria
+  actualizado para hakkurin_internal_self`), `POST /restart` (destruye+recarga config+recrea cliente).
+- ⚠️ **Observado:** al arrancar sale `[GeminiProvider] No hay API Keys de Gemini configuradas.` hasta el primer
+  `restart`/reload — las keys sí estaban en config (6 keys); revisar el orden de carga (config se lee antes de que
+  `reloadConfig` las levante). No bloqueante: tras restart funciona.
+
 ---
 
 ## 1. Target NestJS module structure
