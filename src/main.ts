@@ -16,9 +16,11 @@ async function bootstrap() {
   setDefaultResultOrder('ipv4first');
 
   const app = await NestFactory.create(AppModule);
-  // Bind localhost por defecto (protección del WebUI). WEBUI_HOST=0.0.0.0 sólo si hay
-  // webui_token configurado y se quiere exponer (ver auth.guard.ts).
-  await app.listen(process.env.PORT ?? 8000, process.env.WEBUI_HOST ?? '127.0.0.1');
+  // Escuchar en '::' (todas las interfaces, IPv4 + IPv6) para que el WebUI sea
+  // accesible desde la red. Sobreescribible con la variable WEBUI_HOST.
+  // Nota: el forzado de IPv4 para las conexiones *salientes* (Discord/Gemini/sidecar)
+  // se mantiene arriba; '::' sólo afecta al servidor HTTP entrante.
+  await app.listen(process.env.PORT ?? 8000, process.env.WEBUI_HOST ?? '::');
 }
 
 bootstrap().catch((err) => {
