@@ -29,6 +29,10 @@ YTDL_OPTS = {
     "no_warnings": True,
     "default_search": "auto",  # acepta strings de búsqueda, no solo URLs
     "source_address": "0.0.0.0",
+    # ponytail: android esquiva el bot-check 429 de YouTube (el cliente web lo
+    # recibe desde ~2026). Si android se bloquea algún día, upgrade path: cookies
+    # (cookiefile) o player_client=["android","web"].
+    "extractor_args": {"youtube": {"player_client": ["android"]}},
 }
 
 app = FastAPI(title="hakkurin yt-dlp sidecar")

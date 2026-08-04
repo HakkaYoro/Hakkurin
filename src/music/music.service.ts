@@ -38,8 +38,8 @@ const SIDECAR_DEFAULT = 'http://localhost:7654';
 const EMPTY_VC_GRACE_MS = 5 * 60 * 1000; // 5 min → desconectar
 const VOLUME = 0.5;
 // Buffer de read-ahead entre ffmpeg y el OggDemuxer. Sin coste de latencia (sólo
-// gobierna backpressure al writer); aguanta ~30-60s de Opus ante un stall de fuente.
-const BUFFER_BYTES = 512 * 1024;
+// gobierna backpressure al writer); aguanta ~1-2min de Opus ante un stall de fuente.
+const BUFFER_BYTES = 1024 * 1024;
 
 export interface QueueItem {
   type: 'youtube' | 'navidrome';
@@ -315,6 +315,9 @@ export class MusicService {
     // filtro de ffmpeg. Salida por pipe a un PassThrough con read-ahead grande.
     const ff = spawn('ffmpeg', [
       '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
+      // read-ahead del thread de input: sin esto puede starvarse periódicamente y
+      // producir gaps que el PassThrough (que vive después de ffmpeg) no puede tapar.
+      '-thread_queue_size', '512',
       '-i', streamUrl,
       '-f', 'opus', '-ar', '48000', '-ac', '2',
       '-filter:a', `volume=${VOLUME}`,
@@ -341,19 +344,35 @@ export class MusicService {
     if (item.type === 'navidrome') return item.url;
     // YouTube → sidecar yt-dlp extrae la URL directa de stream.
     const sidecar = this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
+    const url = `${sidecar}/extract?url=${encodeURIComponent(item.url)}`;
+
+    let res: Response;
     try {
-      const res = await fetch(`${sidecar}/extract?url=${encodeURIComponent(item.url)}`);
-      if (res.ok) {
-        const data: any = await res.json();
-        if (data.stream_url) {
-          if (!item.title && data.title) item.title = data.title;
-          return data.stream_url;
-        }
-      }
-    } catch (e) {
-      this.logger.warn(`Sidecar yt-dlp falló para ${item.url}: ${(e as Error).message}`);
+      // ponytail: AbortSignal.timeout (stdlib) — bounda la llamada; un sidecar
+      // colgado no bloquea playNext indefinidamente.
+      res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    } catch (e: any) {
+      // "fetch failed" esconde la razón en e.cause (ECONNREFUSED/ENOTFOUND/TimeoutError…).
+      const c = e?.cause;
+      const reason = c?.code ?? c?.syscall ?? c?.hostname ?? e?.name ?? e?.message;
+      this.logger.warn(`Sidecar yt-dlp falló para ${item.url}: ${reason}`);
+      return '';
     }
-    return '';
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      // 502 = yt-dlp desactualizado/bot-blocked; 404 = sin resultados; 500 = URL no resuelta.
+      this.logger.warn(`Sidecar ${res.status} para ${item.url}: ${body.slice(0, 200)}`);
+      return '';
+    }
+
+    const data: any = await res.json().catch(() => null);
+    if (!data?.stream_url) {
+      this.logger.warn(`Sidecar 200 sin stream_url para ${item.url}`);
+      return '';
+    }
+    if (!item.title && data.title) item.title = data.title;
+    return data.stream_url;
   }
 
   // --- Radio infinita (music_manager.py:260-313) ---

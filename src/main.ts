@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { setDefaultResultOrder } from 'node:dns';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
@@ -16,6 +17,22 @@ async function bootstrap() {
   setDefaultResultOrder('ipv4first');
 
   const app = await NestFactory.create(AppModule);
+
+  // Diagnóstico de stutter: el pacer de 20ms de voz de @discordjs/voice vive en
+  // este event-loop; si se bloquea (sync pesado, GC), Discord recibe silencio
+  // aunque el buffer de audio esté lleno. Log de percentiles cada 30s para
+  // correlacionar con micro-cortes. ponytail: console.log directo, sin DI.
+  const loop = monitorEventLoopDelay({ resolution: 10 });
+  loop.enable();
+  setInterval(() => {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[eventloop] p50=${loop.percentile(50).toFixed(1)}ms ` +
+        `p99=${loop.percentile(99).toFixed(1)}ms ` +
+        `p99.9=${loop.percentile(99.9).toFixed(1)}ms`,
+    );
+  }, 30_000).unref();
+
   // Escuchar en '::' (todas las interfaces, IPv4 + IPv6) para que el WebUI sea
   // accesible desde la red. Sobreescribible con la variable WEBUI_HOST.
   // Nota: el forzado de IPv4 para las conexiones *salientes* (Discord/Gemini/sidecar)
