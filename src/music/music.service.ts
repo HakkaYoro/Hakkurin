@@ -1,20 +1,24 @@
 // Puerto de bot/music_manager.py. Estado por guild + reproducción con
 // @discordjs/voice. El evento AudioPlayerStatus.Idle REEMPLAZA al callback after=
-// y al guard is_fetching (music_manager.py:167-173,236). Volumen inlineVolume 0.5
-// = PCMVolumeTransformer(volume=0.5). YouTube se resuelve vía sidecar yt-dlp
-// (sidecar/extract_server.py); Navidrome trae URL de stream directa.
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { spawn } from 'child_process';
+// y al guard is_fetching (music_manager.py:167-173,236). ffmpeg emite Opus 48k
+// estéreo directo (StreamType.OggOpus, sin re-encode JS); el volumen se aplica vía
+// filtro de ffmpeg. Un PassThrough de read-ahead (BUFFER_BYTES) amortigua el jitter
+// de fuente/red para evitar stutter (el buffer del OggDemuxer interno es ~320ms).
+// YouTube se resuelve vía sidecar yt-dlp (sidecar/extract_server.py); Navidrome
+// trae URL de stream directa.
+import { Injectable, Logger } from '@nestjs/common';
+import { spawn, type ChildProcess } from 'child_process';
+import { PassThrough } from 'stream';
 import {
   AudioPlayerStatus,
   type AudioResource,
   createAudioPlayer,
   createAudioResource,
   entersState,
-  generateDependencyReport,
   getVoiceConnection,
   joinVoiceChannel,
   StreamType,
+  VoiceConnectionDisconnectReason,
   VoiceConnectionStatus,
   type AudioPlayer,
   type VoiceConnection,
@@ -33,6 +37,9 @@ import { NavidromeService, type NavidromeSong } from '../navidrome/navidrome.ser
 const SIDECAR_DEFAULT = 'http://localhost:7654';
 const EMPTY_VC_GRACE_MS = 5 * 60 * 1000; // 5 min → desconectar
 const VOLUME = 0.5;
+// Buffer de read-ahead entre ffmpeg y el OggDemuxer. Sin coste de latencia (sólo
+// gobierna backpressure al writer); aguanta ~30-60s de Opus ante un stall de fuente.
+const BUFFER_BYTES = 512 * 1024;
 
 export interface QueueItem {
   type: 'youtube' | 'navidrome';
@@ -58,10 +65,11 @@ interface GuildMusicState {
   player: AudioPlayer | null;
   connection: VoiceConnection | null;
   textChannel: TextChannel | null;
+  ffmpeg: ChildProcess | null; // proceso ffmpeg del track actual; SIGKILL al cambiar/cortar
 }
 
 @Injectable()
-export class MusicService implements OnModuleInit {
+export class MusicService {
   private readonly logger = new Logger(MusicService.name);
   private readonly guilds = new Map<string, GuildMusicState>();
 
@@ -69,11 +77,6 @@ export class MusicService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly navidrome: NavidromeService,
   ) {}
-
-  onModuleInit(): void {
-    // Diagnóstico one-shot: confirma ffmpeg/opus/encryption disponibles.
-    // Ya no es necesario loguear el reporte de dependencias de voz completo en cada inicio
-  }
 
   /**
    * Ocupado = hay player Y su estado no es Idle. Tras player.play() el player pasa
@@ -87,24 +90,7 @@ export class MusicService implements OnModuleInit {
 
   private state(guildId: string): GuildMusicState {
     let s = this.guilds.get(guildId);
-    if (!s) {
-      s = {
-        queue: [],
-        currentSong: null,
-        currentArtist: 'Unknown Artist',
-        currentAlbum: 'Unknown Album',
-        skipVotes: new Set(),
-        emptySince: null,
-        playHistory: [],
-        isRadioMode: false,
-        radioPlayedIds: new Set(),
-        isFetching: false,
-        player: null,
-        connection: null,
-        textChannel: null,
-      };
-      this.guilds.set(guildId, s);
-    }
+    if (!s) this.guilds.set(guildId, (s = newState()));
     return s;
   }
 
@@ -123,39 +109,43 @@ export class MusicService implements OnModuleInit {
     return (member.voice?.channel as { id: string; guild: { voiceAdapterCreator: any } } | null) ?? null;
   }
 
-  // Log de transiciones de estado, debug interno y errores de networking del
-  // VoiceConnection. El canal 'debug' (habilitado vía joinVoiceChannel({debug:true}))
-  // revela el close-code del WS de voz y el contenido del READY (ip/modes): clave para
-  // diagnosticar por qué no llega a Ready sin ir a ciegas.
-  // Idempotente: joinFromButton puede llamarse sobre la MISMA conexión persistente
-  // en cada clic de botón de Navidrome — sin el guard acumularía listeners y
-  // dispararía MaxListenersExceededWarning + logs duplicados.
+  // Log de transiciones de estado y reconexión automática. El canal 'debug'
+  // (habilitado vía joinVoiceChannel({debug:true})) revela el close-code del WS
+  // de voz y el READY (ip/modes). Idempotente (__hakDiag): joinFromButton puede
+  // llamarse sobre la MISMA conexión persistente en cada clic de botón.
   private attachVoiceDiagnostics(connection: VoiceConnection, guildId: string): void {
     if ((connection as any).__hakDiag) return;
     (connection as any).__hakDiag = true;
     connection.on('stateChange', (oldState, newState) => {
       this.logger.debug(`VC ${guildId}: ${oldState.status} → ${newState.status}`);
-      // Reconexión automática: si Discord cierra el WS de voz pero es
-      // recuperable, rejoinVoiceChannel re-emite OP4 con token fresco.
-      // Si no es recuperable (kick/ban/canal eliminado), destruir.
-      if (newState.status === VoiceConnectionStatus.Disconnected) {
-        const recoverable =
-          'reason' in newState &&
-          (newState as any).reason ===
-            /* WebSocketClosedEvent reason 4014 = moved/disconnected */
-            0; // fallback: intentar siempre
-        // Upgrade path: si @discordjs/voice expone DisconnectReason, comparar
-        // contra DisconnectReason.WebSocketClose vs .AdapterUnavailable.
-        void entersState(connection, VoiceConnectionStatus.Connecting, 5_000).catch(() => {
-          this.logger.warn(`VC ${guildId}: desconexión irrecuperable, destruyendo.`);
-          try { connection.destroy(); } catch {}
-          const s = this.guilds.get(guildId);
-          if (s) s.connection = null;
-        });
+      if (newState.status !== VoiceConnectionStatus.Disconnected) return;
+      const reason = (newState as any).reason as VoiceConnectionDisconnectReason | undefined;
+      // EndpointRemoved / Manual nunca se recuperan solos: cortar de inmediato.
+      if (reason === VoiceConnectionDisconnectReason.EndpointRemoved ||
+          reason === VoiceConnectionDisconnectReason.Manual) {
+        this.tearDownConnection(guildId, connection, 'desconexión irrecuperable');
+        return;
       }
+      // Recoverable: la librería re-emite OP4 (→ Signalling) o re-configura la red
+      // (→ Connecting). Race de ambos, luego re-confirmar Ready antes de dar por buena.
+      Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+      ])
+        .then(() => entersState(connection, VoiceConnectionStatus.Ready, 30_000))
+        .then(() => this.logger.log(`VC ${guildId}: reconectado.`))
+        .catch(() => this.tearDownConnection(guildId, connection, 'reconexión falló'));
     });
-    // Debug logs de conexión removidos para evitar spam en consola
     connection.on('error', (e) => this.logger.warn(`VC networking ${guildId}: ${e.message}`));
+  }
+
+  /** Destruye la conexión + mata ffmpeg + limpia state. Centraliza el teardown. */
+  private tearDownConnection(guildId: string, connection: VoiceConnection, why: string): void {
+    const s = this.guilds.get(guildId);
+    if (s?.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
+    try { connection.destroy(); } catch {}
+    if (s) s.connection = null;
+    this.logger.warn(`VC ${guildId}: ${why}.`);
   }
 
   // Join de un solo intento. El force-IPv4 vive en main.ts (porteo del source_address
@@ -171,40 +161,34 @@ export class MusicService implements OnModuleInit {
       await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
       return connection;
     } catch (e) {
-      try { connection.destroy(); } catch {}
       this.logger.error(`No se pudo conectar al VC ${guildId}: ${(e as Error).message}`);
+      this.tearDownConnection(guildId, connection, 'join falló');
       return null;
     }
   }
 
-  async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
-    const member = interaction.member as GuildMember;
-    const vc = this.voiceChannelOf(member);
-    if (!vc) {
-      await safeFollowup(interaction, '¡Necesitas estar en un canal de voz para que pueda poner música!');
-      return false;
-    }
-    const guildId = interaction.guildId;
-    const s = this.state(guildId);
-
-    // joinVoiceChannel es idempotente: si la conexión ya existe, la
-    // reconfigura con datos frescos del Gateway (nuevo token de voz).
-    // Destruir si está en Destroyed para evitar re-usar un cadáver.
+  /**
+   * Join compartido por joinVoice y joinFromButton. Centraliza: cleanup de
+   * ghost-session (anti 4006), el joinVC idempotente, y la pausa de
+   * estabilización anti-"audio a 2×". Devuelve la conexión lista o null.
+   */
+  private async connect(
+    guildId: string,
+    guild: Guild,
+    vc: { id: string; guild: { voiceAdapterCreator: any } },
+  ): Promise<VoiceConnection | null> {
+    // joinVoiceChannel es idempotente: si la conexión ya existe la reconfigura
+    // con datos frescos del Gateway. Una Destroyed no se recicla (crea una nueva).
     const existing = getVoiceConnection(guildId);
-    if (existing?.state.status === VoiceConnectionStatus.Destroyed) {
-      // No se puede reciclar, joinVoiceChannel creará una nueva.
-    }
 
-    // Prevención de Error 4006 (Session no longer valid):
-    // Si reiniciamos el bot mientras estaba en un VC, la API de Discord mantiene
-    // el state (ghost session) y reciclará el `session_id` viejo pero generará
-    // un `token` nuevo. Esto provoca que el Voice WebSocket devuelva 4006.
-    // Para forzar un session_id nuevo, debemos enviar channel_id: null primero.
-    const me = interaction.guild?.members.me;
+    // Prevención de 4006 (Session no longer valid): un restart deja una ghost
+    // session que recicla session_id viejo + token nuevo → el Voice WS devuelve
+    // 4006. Desconectar primero fuerza un session_id nuevo.
+    const me = guild.members?.me;
     if (!existing && me?.voice?.channelId) {
-      this.logger.debug(`Limpiando ghost session del VC ${me.voice.channelId} para renovar session_id...`);
+      this.logger.debug(`Limpiando ghost session del VC ${me.voice.channelId}...`);
       try { await me.voice.disconnect(); } catch {}
-      await delay(1000); // Dar tiempo al Gateway a procesar la salida y resetear el state
+      await delay(1000);
     }
 
     const connection = await this.joinVC(guildId, () =>
@@ -216,14 +200,24 @@ export class MusicService implements OnModuleInit {
         debug: true,
       }),
     );
+    if (!connection) return null;
+    // Estabiliza el socket UDP de voz (previene audio "a 2×": discord_client.py:152-153).
+    if (!existing) await delay(1000);
+    return connection;
+  }
+
+  async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
+    const vc = this.voiceChannelOf(interaction.member as GuildMember);
+    if (!vc) {
+      await safeFollowup(interaction, '¡Necesitas estar en un canal de voz para que pueda poner música!');
+      return false;
+    }
+    const connection = await this.connect(interaction.guildId, interaction.guild!, vc);
     if (!connection) {
       await safeFollowup(interaction, 'No logré conectarme al canal de voz. Revisa los logs de MusicService (debug de voz activo).');
       return false;
     }
-    // Pausa breve para estabilizar el socket de voz
-    // (previene audio "a 2x" — discord_client.py:152-153).
-    if (!existing) await delay(1000);
-    s.connection = connection;
+    this.state(interaction.guildId).connection = connection;
     return true;
   }
 
@@ -235,6 +229,7 @@ export class MusicService implements OnModuleInit {
 
     s.isFetching = true;
     s.textChannel = channel;
+    let errored = false;
     try {
       s.skipVotes.clear();
 
@@ -253,7 +248,7 @@ export class MusicService implements OnModuleInit {
         if (s.playHistory.length > 5) s.playHistory.shift();
 
         const streamUrl = await this.resolveStreamUrl(item);
-        const resource = this.makeResource(streamUrl);
+        const resource = this.makeResource(guild.id, streamUrl);
         if (!resource) throw new Error('No se pudo crear el recurso de audio.');
 
         if (item.type === 'navidrome') {
@@ -278,35 +273,46 @@ export class MusicService implements OnModuleInit {
         s.currentSong = null;
       }
     } catch (e) {
+      errored = true;
       this.logger.error(`Error reproduciendo música: ${(e as Error).message}`);
       await sendText(channel, `Ocurrió un error al reproducir: ${(e as Error).message}`);
-      s.isFetching = false;
-      void this.playNext(guild, channel); // saltar a la siguiente
     } finally {
       s.isFetching = false;
     }
+    // Avanzar sólo tras resetear isFetching: evita que el finally pise el flag de
+    // la recursión y abra una reentrada.
+    if (errored) void this.playNext(guild, channel);
   }
 
   private ensurePlayer(guildId: string): AudioPlayer {
     const s = this.state(guildId);
-    if (s.player) return s.player;
-    const player = createAudioPlayer();
-    // Idle = canción terminó → siguiente (reemplaza el callback after= de discord.py).
-    player.on(AudioPlayerStatus.Idle, () => {
-      const st = this.state(guildId);
-      st.isFetching = false;
-      if (st.textChannel) void this.playNext(st.textChannel.guild, st.textChannel);
-    });
-    player.on('error', (e) => this.logger.error(`AudioPlayer error: ${e.message}`));
-    s.player = player;
-    if (s.connection) s.connection.subscribe(player);
-    return player;
+    if (!s.player) {
+      const player = createAudioPlayer();
+      // Idle = canción terminó → matar ffmpeg y avanzar cola (reemplaza after=).
+      player.on(AudioPlayerStatus.Idle, () => {
+        const st = this.state(guildId);
+        if (st.ffmpeg) { try { st.ffmpeg.kill('SIGKILL'); } catch {} st.ffmpeg = null; }
+        st.isFetching = false;
+        if (st.textChannel) void this.playNext(st.textChannel.guild, st.textChannel);
+      });
+      player.on('error', (e) => this.logger.error(`AudioPlayer error: ${e.message}`));
+      s.player = player;
+    }
+    // Re-bind siempre. subscribe() es idempotente (dedupea por conexión); la
+    // conexión destruida ya limpió su suscripción. Sin esto, tras /stop→/play o
+    // una reconexión el player cacheado queda sin suscripción → AutoPaused → silencio.
+    if (s.connection) s.connection.subscribe(s.player);
+    return s.player;
   }
 
-  private makeResource(streamUrl: string): AudioResource | null {
+  private makeResource(guildId: string, streamUrl: string): AudioResource | null {
     if (!streamUrl) return null;
-    // ffmpeg → Opus estéreo 48k directo (evita transcodificación JS/opusscript,
-    // previniendo lag y pérdida de paquetes). Volumen aplicado vía filtro de ffmpeg.
+    const s = this.state(guildId);
+    // Cortar cualquier ffmpeg previo (skip/stop/reemplazo de track).
+    if (s.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
+
+    // ffmpeg → Opus estéreo 48k directo (sin re-encode JS/opusscript). Volumen vía
+    // filtro de ffmpeg. Salida por pipe a un PassThrough con read-ahead grande.
     const ff = spawn('ffmpeg', [
       '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
       '-i', streamUrl,
@@ -314,10 +320,21 @@ export class MusicService implements OnModuleInit {
       '-filter:a', `volume=${VOLUME}`,
       '-loglevel', 'error', '-hide_banner', 'pipe:1',
     ]);
-    // ffmpeg stderr logging removido para no saturar la consola
+    s.ffmpeg = ff;
+    // Drenar stderr: debug + evita que el pipe kernel (64KB) se llene en bucles de
+    // error y atasque stdout (→ underrun → stutter).
+    ff.stderr.on('data', (d: Buffer) => this.logger.debug(`ffmpeg: ${d.toString().trim()}`));
     ff.on('error', (e) => this.logger.error(`ffmpeg spawn falló: ${e.message}. ¿ffmpeg instalado?`));
-    const resource = createAudioResource(ff.stdout, { inputType: StreamType.OggOpus, inlineVolume: false });
-    return resource;
+    ff.once('exit', () => { if (s.ffmpeg === ff) s.ffmpeg = null; });
+
+    // Buffer de read-ahead: amortigua jitter de fuente/red (sin coste de latencia:
+    // highWaterMark sólo gobierna el backpressure al writer).
+    const buf = new PassThrough({ highWaterMark: BUFFER_BYTES });
+    ff.stdout.pipe(buf);
+    ff.stdout.on('error', () => {}); // tragar EPIPE tras kill
+    buf.on('error', () => {});
+
+    return createAudioResource(buf, { inputType: StreamType.OggOpus, inlineVolume: false });
   }
 
   private async resolveStreamUrl(item: QueueItem): Promise<string> {
@@ -472,14 +489,13 @@ export class MusicService implements OnModuleInit {
     s.queue = [];
     s.skipVotes.clear();
     const conn = getVoiceConnection(interaction.guildId);
-    if (conn) {
-      s.player?.stop();
-      conn.destroy();
-      s.connection = null;
-      await safeFollowup(interaction, '⏹️ Música detenida y desconectada.');
-    } else {
+    if (!conn) {
       await safeFollowup(interaction, 'No estoy conectado.');
+      return;
     }
+    s.player?.stop();
+    this.tearDownConnection(interaction.guildId, conn, 'stop');
+    await safeFollowup(interaction, '⏹️ Música detenida y desconectada.');
   }
 
   // Variantes para interacciones de botón (no ChatInputCommandInteraction): unen
@@ -487,22 +503,9 @@ export class MusicService implements OnModuleInit {
   async joinFromButton(guild: Guild, member: GuildMember): Promise<boolean> {
     const vc = this.voiceChannelOf(member);
     if (!vc) return false;
-    const s = this.state(guild.id);
-
-    // Mismo patrón que joinVoice: siempre joinVoiceChannel (idempotente).
-    const existing = getVoiceConnection(guild.id);
-    const connection = await this.joinVC(guild.id, () =>
-      joinVoiceChannel({
-        channelId: vc.id,
-        guildId: guild.id,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: true,
-        debug: true,
-      }),
-    );
+    const connection = await this.connect(guild.id, guild, vc);
     if (!connection) return false;
-    if (!existing) await delay(1000);
-    s.connection = connection;
+    this.state(guild.id).connection = connection;
     return true;
   }
 
@@ -555,8 +558,7 @@ export class MusicService implements OnModuleInit {
           s.skipVotes.clear();
           s.emptySince = null;
           s.player?.stop();
-          conn.destroy();
-          s.connection = null;
+          this.tearDownConnection(guildId, conn, `inactividad en ${guildId}`);
           this.logger.log(`Desconectado de ${guildId} por inactividad.`);
         }
       } else {
@@ -592,6 +594,25 @@ export class MusicService implements OnModuleInit {
       await sendText(channel, `🎶 Reproduciendo ahora: **${title}**`);
     }
   }
+}
+
+function newState(): GuildMusicState {
+  return {
+    queue: [],
+    currentSong: null,
+    currentArtist: 'Unknown Artist',
+    currentAlbum: 'Unknown Album',
+    skipVotes: new Set(),
+    emptySince: null,
+    playHistory: [],
+    isRadioMode: false,
+    radioPlayedIds: new Set(),
+    isFetching: false,
+    player: null,
+    connection: null,
+    textChannel: null,
+    ffmpeg: null,
+  };
 }
 
 function delay(ms: number): Promise<void> {
