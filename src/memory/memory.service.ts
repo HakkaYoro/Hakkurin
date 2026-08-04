@@ -165,7 +165,16 @@ export class MemoryService implements OnModuleInit {
       const decrypted = this.crypto.decrypt(data);
       return normalizeMemorySchema(JSON.parse(decrypted));
     } catch (e: any) {
-      if (e.code !== 'ENOENT') this.logger.warn(`Error leyendo memoria de ${user_id}: ${e.message}`);
+      if (e.code !== 'ENOENT') {
+        this.logger.warn(`Error leyendo memoria de ${user_id}: ${e.message}. Eliminando archivo corrupto.`);
+        try {
+          await fs.unlink(filePath);
+          const txtPath = path.join(SUMMARY_DIR, `${user_id}.txt`);
+          await fs.unlink(txtPath).catch(() => {});
+        } catch (unlinkErr) {
+           // Ignorar si no se puede borrar
+        }
+      }
       return createEmptyMemory();
     }
   }
@@ -315,6 +324,36 @@ export class MemoryService implements OnModuleInit {
     }
     out.sort((a, b) => (a.date < b.date ? 1 : -1));
     return out;
+  }
+
+  async deleteMemory(user_id: string): Promise<void> {
+    const encPath = this.filePath(user_id);
+    const txtPath = path.join(SUMMARY_DIR, `${user_id}.txt`);
+    try {
+      await fs.unlink(encPath).catch(() => {});
+      await fs.unlink(txtPath).catch(() => {});
+    } catch (e) {
+      this.logger.error(`Error borrando memoria de ${user_id}: ${(e as Error).message}`);
+    }
+  }
+
+  async deleteAllMemories(): Promise<void> {
+    try {
+      const encFiles = await fs.readdir(MEMORY_DIR);
+      for (const file of encFiles) {
+        if (file.endsWith('.enc')) {
+          await fs.unlink(path.join(MEMORY_DIR, file)).catch(() => {});
+        }
+      }
+      const txtFiles = await fs.readdir(SUMMARY_DIR);
+      for (const file of txtFiles) {
+        if (file.endsWith('.txt')) {
+          await fs.unlink(path.join(SUMMARY_DIR, file)).catch(() => {});
+        }
+      }
+    } catch (e) {
+      this.logger.error(`Error borrando todas las memorias: ${(e as Error).message}`);
+    }
   }
 
   // get_memory_summary (memory_manager.py:273-295)

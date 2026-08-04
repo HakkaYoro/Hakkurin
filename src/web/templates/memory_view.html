@@ -1,7 +1,12 @@
 {% extends '_base.html' %}
 {% block title %}Memoria: {{ user_id }}{% endblock %}
 {% block body %}
-<a href="/memories" class="back-btn">← Volver a la lista</a>
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <a href="/memories" class="back-btn">← Volver a la lista</a>
+    <form action="/memories/{{ user_id }}/delete" method="post" onsubmit="return confirm('¿Borrar la memoria de {{ user_id }}?');">
+        <button type="submit" style="background: #ff5555; color: white; padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer;">⚠️ Borrar Memoria</button>
+    </form>
+</div>
 <h1>Memoria de {{ user_id }}</h1>
 <div class="content-box">{{ content }}</div>
 {% endblock %}

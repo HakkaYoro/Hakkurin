@@ -100,6 +100,18 @@ export class WebController {
     return this.view.render('memory_view.html', { user_id: userId, content });
   }
 
+  @Post('memories/delete_all')
+  @Redirect('/memories?deleted=all', 303)
+  async deleteAllMemories(): Promise<void> {
+    await this.memory.deleteAllMemories();
+  }
+
+  @Post('memories/:user_id/delete')
+  @Redirect('/memories?deleted=single', 303)
+  async deleteMemory(@Param('user_id') userId: string): Promise<void> {
+    await this.memory.deleteMemory(userId);
+  }
+
   private async setIf(body: any, key: string): Promise<void> {
     const val = body[key];
     if (typeof val === 'string' && val.trim()) await this.config.set(key, val.trim());
