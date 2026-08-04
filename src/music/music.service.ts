@@ -21,6 +21,7 @@ import {
 } from '@discordjs/voice';
 import {
   ChannelType,
+  EmbedBuilder,
   type ChatInputCommandInteraction,
   type Guild,
   type GuildMember,
@@ -304,17 +305,18 @@ export class MusicService implements OnModuleInit {
 
   private makeResource(streamUrl: string): AudioResource | null {
     if (!streamUrl) return null;
-    // ffmpeg → PCM s16le 48k estéreo (igual que FFmpegPCMAudio de discord.py).
+    // ffmpeg → Opus estéreo 48k directo (evita transcodificación JS/opusscript,
+    // previniendo lag y pérdida de paquetes). Volumen aplicado vía filtro de ffmpeg.
     const ff = spawn('ffmpeg', [
       '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
       '-i', streamUrl,
-      '-f', 's16le', '-ar', '48000', '-ac', '2',
+      '-f', 'opus', '-ar', '48000', '-ac', '2',
+      '-filter:a', `volume=${VOLUME}`,
       '-loglevel', 'error', '-hide_banner', 'pipe:1',
     ]);
     // ffmpeg stderr logging removido para no saturar la consola
     ff.on('error', (e) => this.logger.error(`ffmpeg spawn falló: ${e.message}. ¿ffmpeg instalado?`));
-    const resource = createAudioResource(ff.stdout, { inputType: StreamType.Raw, inlineVolume: true });
-    resource.volume?.setVolume(VOLUME);
+    const resource = createAudioResource(ff.stdout, { inputType: StreamType.OggOpus, inlineVolume: false });
     return resource;
   }
 
@@ -577,9 +579,18 @@ export class MusicService implements OnModuleInit {
   }
 
   private async sendNowPlayingEmbed(channel: TextChannel, title: string, coverUrl: string): Promise<void> {
-    await sendText(channel, `🎶 Reproduciendo ahora: **${title}**`);
-    // ponytail: cover via embed requiere EmbedBuilder + setThumbnail; el texto basta
-    // y evita exponer la URL de cover (u/t/s) en logs. Añadir embed si se quiere thumb.
+    const embed = new EmbedBuilder()
+      .setTitle('🎶 Reproduciendo ahora')
+      .setDescription(`**${title}**`)
+      .setColor(0x3498db) // blue
+      .setThumbnail(coverUrl)
+      .setFooter({ text: 'Hakkurei Music' });
+
+    try {
+      await channel.send({ embeds: [embed] });
+    } catch {
+      await sendText(channel, `🎶 Reproduciendo ahora: **${title}**`);
+    }
   }
 }
 
