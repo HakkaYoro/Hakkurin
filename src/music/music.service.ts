@@ -224,8 +224,9 @@ export class MusicService {
   // --- Reproducción (music_manager.py:164-258) ---
   async playNext(guild: Guild, channel: TextChannel): Promise<void> {
     const s = this.state(guild.id);
-    if (s.isFetching) return;
-    if (this.isBusy(s)) return;
+    // TEMP(diagnóstico avance): si Idle dispara pero playNext aborta, estos logs lo revelan.
+    if (s.isFetching) { this.logger.debug('playNext abort: isFetching'); return; }
+    if (this.isBusy(s)) { this.logger.debug('playNext abort: isBusy'); return; }
 
     s.isFetching = true;
     s.textChannel = channel;
@@ -290,6 +291,9 @@ export class MusicService {
       const player = createAudioPlayer();
       // Idle = canción terminó → matar ffmpeg y avanzar cola (reemplaza after=).
       player.on(AudioPlayerStatus.Idle, () => {
+        // TEMP(diagnóstico avance): confirma que Idle dispara al terminar/skippear.
+        // Borrar tras verificar el Fix 1 en vivo.
+        this.logger.debug(`player Idle → playNext (guild ${guildId})`);
         const st = this.state(guildId);
         if (st.ffmpeg) { try { st.ffmpeg.kill('SIGKILL'); } catch {} st.ffmpeg = null; }
         st.isFetching = false;
@@ -336,6 +340,14 @@ export class MusicService {
     ff.stdout.pipe(buf);
     ff.stdout.on('error', () => {}); // tragar EPIPE tras kill
     buf.on('error', () => {});
+
+    // Forzar EOF del buffer al cerrar ffmpeg. Sin esto el PassThrough puede no
+    // propagar el fin → el AudioResource nunca termina → el player no pasa a Idle
+    // → la cola no avanza (bug de avance + radio). 'close' se emite siempre
+    // (natural o tras SIGKILL) y tras el cierre de los stdio, así que buf ya recibió
+    // todo el Opus. Idempotente si el pipe ya había terminado. Si esto no dispara
+    // Idle en vivo, subir a buf.destroy().
+    ff.once('close', () => { try { buf.end(); } catch {} });
 
     return createAudioResource(buf, { inputType: StreamType.OggOpus, inlineVolume: false });
   }
@@ -482,7 +494,8 @@ export class MusicService {
       await safeFollowup(interaction, 'Debes estar en el mismo canal de voz para saltar.', true);
       return;
     }
-    // Mayoría de humanos en el canal.
+    // Votación de mayoría: mitad + 1 de los humanos en el canal (comportamiento
+    // deseado). Alcanzada la mayoría, player.stop() fuerza Idle → playNext avanza.
     const humans = await this.humansInVoice(interaction.guild!, myChannel);
     const needed = Math.floor(humans.length / 2) + 1;
     if (!s.skipVotes.has(interaction.user.id)) {
@@ -543,11 +556,14 @@ export class MusicService {
       return;
     }
     const lines: string[] = [];
-    if (current) lines.push(`**Reproduciendo ahora:** **${current}**`);
+    if (current) lines.push(`▶️ **Reproduciendo ahora:** ${current}`);
     if (s.queue.length) {
       lines.push('**En cola:**');
       s.queue.slice(0, 10).forEach((item, i) => {
-        let t = item.title ?? item.url ?? 'Unknown';
+        // YouTube sin título resuelto (se resuelve perezosamente tras el shift):
+        // URL envuelta en <> = clic limpio, no rompe el layout como la URL cruda.
+        const fallback = item.type === 'youtube' ? `<${item.url}>` : (item.url ?? 'Unknown');
+        let t = item.title ?? fallback;
         if (item.artist && !['Unknown Artist', 'Unknown'].includes(item.artist)) t = `${item.artist} - ${t}`;
         lines.push(`\`${i + 1}.\` ${t}`);
       });
