@@ -40,6 +40,9 @@ const VOLUME = 0.5;
 // Buffer de read-ahead entre ffmpeg y el OggDemuxer. Sin coste de latencia (sólo
 // gobierna backpressure al writer); aguanta ~1-2min de Opus ante un stall de fuente.
 const BUFFER_BYTES = 1024 * 1024;
+// Pre-buffer (anti-stutter): pausa tras spawn ffmpeg para que llene el PassThrough
+// antes de sonar. CPU modesto (i5-2400) + canal de voz 64k → 5s de colchón.
+const PREBUFFER_MS = 5_000;
 
 export interface QueueItem {
   type: 'youtube' | 'navidrome';
@@ -266,6 +269,10 @@ export class MusicService {
         }
 
         const player = this.ensurePlayer(guild.id);
+        // Pre-buffer: esperar PREBUFFER_MS tras spawn para que ffmpeg llene el
+        // PassThrough (1MB) y el player arranque con colchón. Sin esto el jitter de
+        // fuente/red llega a underrun → stutter (CPU modesto i5-2400).
+        await delay(PREBUFFER_MS);
         player.play(resource);
 
         if (item.type === 'navidrome' && item.cover_url) {
@@ -327,6 +334,10 @@ export class MusicService {
       // producir gaps que el PassThrough (que vive después de ffmpeg) no puede tapar.
       '-thread_queue_size', '512',
       '-i', streamUrl,
+      // Encoding ligero para CPU modesto (i5-2400): libopus@96k sobra para el canal
+      // de voz de Discord (64k); compression_level bajo = mucho menos CPU con pérdida
+      // mínima de calidad. -f opus mantiene el container Ogg/Opus que lee @discordjs/voice.
+      '-c:a', 'libopus', '-b:a', '96k', '-compression_level', '3',
       '-f', 'opus', '-ar', '48000', '-ac', '2',
       '-filter:a', `volume=${VOLUME}`,
       '-loglevel', 'error', '-hide_banner', 'pipe:1',
