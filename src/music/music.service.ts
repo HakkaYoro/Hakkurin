@@ -56,6 +56,7 @@ interface GuildMusicState {
   currentSong: string | null;
   currentArtist: string;
   currentAlbum: string;
+  currentCoverUrl: string | null; // cover de la canción actual → thumbnail del embed de /queue
   skipVotes: Set<string>;
   emptySince: number | null;
   playHistory: QueueItem[];
@@ -258,8 +259,10 @@ export class MusicService {
           s.currentArtist = artist;
           s.currentAlbum = item.album ?? 'Unknown Album';
           s.currentSong = artist !== 'Unknown Artist' ? `${artist} - ${title}` : title;
+          s.currentCoverUrl = item.cover_url ?? null;
         } else {
           s.currentSong = item.title ?? 'YouTube';
+          s.currentCoverUrl = null;
         }
 
         const player = this.ensurePlayer(guild.id);
@@ -272,6 +275,7 @@ export class MusicService {
         }
       } else {
         s.currentSong = null;
+        s.currentCoverUrl = null;
       }
     } catch (e) {
       errored = true;
@@ -569,7 +573,17 @@ export class MusicService {
       });
       if (s.queue.length > 10) lines.push(`\n*...y ${s.queue.length - 10} canciones más.*`);
     }
-    await interaction.reply({ content: `🎶 **Cola de Reproducción**\n\n${lines.join('\n')}` }).catch(() => {});
+    // Mismo estilo que el embed de "now playing": título, color azul, footer y
+    // thumbnail de la canción actual cuando es Navidrome (con cover).
+    const embed = new EmbedBuilder()
+      .setTitle('🎶 Cola de Reproducción')
+      .setDescription(lines.join('\n'))
+      .setColor(0x3498db) // blue
+      .setFooter({ text: 'Hakkurei Music' });
+    if (s.currentCoverUrl) embed.setThumbnail(s.currentCoverUrl);
+    await interaction
+      .reply({ embeds: [embed] })
+      .catch(() => interaction.reply({ content: `🎶 **Cola de Reproducción**\n\n${lines.join('\n')}` }).catch(() => {}));
   }
 
   // --- Limpieza de VC vacío (music_manager.py:105-126) — Phase 6 la dispara. ---
@@ -637,6 +651,7 @@ function newState(): GuildMusicState {
     currentSong: null,
     currentArtist: 'Unknown Artist',
     currentAlbum: 'Unknown Album',
+    currentCoverUrl: null,
     skipVotes: new Set(),
     emptySince: null,
     playHistory: [],
