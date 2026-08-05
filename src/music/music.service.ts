@@ -530,17 +530,15 @@ export class MusicService {
 
   async stop(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!interaction.deferred) await interaction.deferReply().catch(() => {});
-    const s = this.state(interaction.guildId);
-    s.isRadioMode = false;
-    s.radioPlayedIds.clear();
-    s.queue = [];
-    s.skipVotes.clear();
+    // Limpieza al 100%: cola, metadata de la canción actual, ffmpeg Y el player
+    // (descartado → el próximo /play crea uno limpio en vez de reutilizar uno
+    // colgado que dejaría la cola estancada).
+    this.resetPlaybackState(interaction.guildId);
     const conn = getVoiceConnection(interaction.guildId);
     if (!conn) {
       await safeFollowup(interaction, 'No estoy conectado.');
       return;
     }
-    s.player?.stop();
     this.tearDownConnection(interaction.guildId, conn, 'stop');
     await safeFollowup(interaction, '⏹️ Música detenida y desconectada.');
   }
@@ -614,10 +612,8 @@ export class MusicService {
       if (humans.length === 0) {
         if (s.emptySince == null) s.emptySince = Date.now();
         else if (Date.now() - s.emptySince >= EMPTY_VC_GRACE_MS) {
-          s.queue = [];
-          s.skipVotes.clear();
+          this.resetPlaybackState(guildId);
           s.emptySince = null;
-          s.player?.stop();
           this.tearDownConnection(guildId, conn, `inactividad en ${guildId}`);
           this.logger.log(`Desconectado de ${guildId} por inactividad.`);
         }
@@ -631,6 +627,29 @@ export class MusicService {
   private textChannel(interaction: ChatInputCommandInteraction): TextChannel | null {
     const ch = interaction.channel;
     return ch && ch.type === ChannelType.GuildText ? (ch as TextChannel) : null;
+  }
+
+  /** Resetea TODO el estado de reproducción de un guild: cola, votos, flags de
+   *  radio, metadata de la canción actual, isFetching, ffmpeg y —CRÍTICO— descarta
+   *  el AudioPlayer cacheado. Si no se descarta, tras /stop queda colgado en estado
+   *  no-Idle → isBusy eterno → el próximo /play deja la cola estancada y /skip no
+   *  avanza (bug: "vuelve con la última canción en silencio"). El handler Idle del
+   *  player viejo es inofensivo: textChannel=null → no invoca playNext. No toca la
+   *  conexión (la destruye el caller vía tearDownConnection). */
+  private resetPlaybackState(guildId: string): void {
+    const s = this.state(guildId);
+    s.queue = [];
+    s.skipVotes.clear();
+    s.isRadioMode = false;
+    s.radioPlayedIds.clear();
+    s.currentSong = null;
+    s.currentCoverUrl = null;
+    s.currentAlbum = 'Unknown Album';
+    s.currentArtist = 'Unknown Artist';
+    s.isFetching = false;
+    s.textChannel = null;
+    if (s.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
+    if (s.player) { try { s.player.stop(); } catch {} s.player = null; }
   }
 
   private async humansInVoice(guild: Guild, channelId: string): Promise<GuildMember[]> {
