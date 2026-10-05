@@ -1,6 +1,9 @@
 services:
   bot:
+    # Dual: `docker compose build` genera y tagea la imagen de GHCR; en el NAS
+    # (sin build) `docker compose pull && up -d` usa la publicada por Actions.
     build: .
+    image: ghcr.io/hakkayoro/hakkurin:latest
     restart: unless-stopped
     ports:
       - "30421:8000"
@@ -20,7 +23,11 @@ services:
   # http://sidecar:7654 — fijo arriba vía env YTDL_SIDECAR_URL.
   sidecar:
     build: ./sidecar
+    image: ghcr.io/hakkayoro/hakkurin-sidecar:latest
     restart: unless-stopped
+    environment:
+      # Logs de uvicorn sin buffering cuando stdout es un pipe (docker logs).
+      - PYTHONUNBUFFERED=1
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7654/health')"]
       interval: 10s
