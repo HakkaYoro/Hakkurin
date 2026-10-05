@@ -2,20 +2,18 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { CryptoService } from './crypto.service';
+import { MemoryRepository, MEMORY_DIR, SUMMARY_DIR } from './memory.repository';
+import { MemoryQueue, QUEUE_FILE } from './memory.queue';
 
-// Puerto fiel de core/memory_manager.py. Memoria por usuario cifrada AES-256-GCM,
-// esquema normalizado defensivamente, cola temporal con dedupe, self-memory
-// (BOT_SELF_ID), espejo plano de resumen para el WebUI. Escrituras atómicas.
+// Puerto fiel de core/memory_manager.py. Esta clase es la política/dominio:
+// esquema normalizado defensivamente, umbrales de resumen, self-memory
+// (BOT_SELF_ID), espejo plano de resumen para el WebUI. Delega la persistencia
+// cifrada en MemoryRepository y la cola temporal en MemoryQueue (a la que pasa
+// la promoción por parámetro para no acoplarse a esta política).
 
-const MEMORY_DIR = 'data/memory/users';
-const SUMMARY_DIR = 'data/memory/summaries';
-const QUEUE_FILE = 'data/memory/queue.json';
-
-const QUEUE_TO_PERMANENT_DELAY_SECONDS = 300;
 const STALE_BUFFER_SECONDS = 1800;
 const SUMMARY_TRIGGER_SECONDS = 1800;
 const SUMMARY_TRIGGER_INTERACTIONS = 20;
-const QUEUE_DUPLICATE_WINDOW_SECONDS = 10;
 
 export const BOT_SELF_ID = 'hakkurin_internal_self';
 
@@ -36,12 +34,6 @@ export interface UserMemory {
   history_buffer: string[];
   last_summary_time: number;
   last_channel_id: number | null;
-}
-
-interface QueueItem {
-  user_id: string;
-  text: string;
-  timestamp: number;
 }
 
 function createEmptyMemory(): UserMemory {
@@ -109,23 +101,24 @@ function normalizeMemorySchema(raw: any): UserMemory {
   return normalized;
 }
 
-function normalizeQueueItem(item: any): QueueItem | null {
-  if (!item || typeof item !== 'object') return null;
-  const user_id = item.user_id;
-  const text = item.text;
-  if (user_id == null || text == null) return null;
-  const uid = String(user_id).trim();
-  const t = String(text).trim();
-  if (!uid || !t) return null;
-  const ts = Number(item.timestamp);
-  return { user_id: uid, text: t, timestamp: Number.isFinite(ts) ? ts : Date.now() / 1000 };
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 @Injectable()
 export class MemoryService implements OnModuleInit {
   private readonly logger = new Logger(MemoryService.name);
+  private readonly repo: MemoryRepository;
+  private readonly queue: MemoryQueue;
 
-  constructor(private readonly crypto: CryptoService) {}
+  // Constructor público sin cambios: los tests lo construyen directo con
+  // `new MemoryService(crypto)`; repo/queue se montan por defecto aquí dentro.
+  constructor(private readonly crypto: CryptoService) {
+    this.repo = new MemoryRepository(crypto);
+    this.queue = new MemoryQueue();
+  }
 
   async onModuleInit(): Promise<void> {
     await this.ensureDirectories();
@@ -137,58 +130,25 @@ export class MemoryService implements OnModuleInit {
     await fs.mkdir(path.dirname(QUEUE_FILE), { recursive: true });
   }
 
+  // ponytail: delegados filePath/atomicWriteBytes existen sólo para que los
+  // tests sigan tocando internals vía as-any; el dominio ya no los usa.
   private filePath(user_id: string): string {
-    return path.join(MEMORY_DIR, `${this.sanitizeUserId(user_id)}.enc`);
-  }
-
-  private sanitizeUserId(user_id: any): string {
-    return String(user_id).trim();
+    return (this.repo as any).filePath(user_id);
   }
 
   private async atomicWriteBytes(filePath: string, data: Buffer): Promise<void> {
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, data);
-    await fs.rename(tmp, filePath);
+    return (this.repo as any).atomicWriteBytes(filePath, data);
   }
 
-  private async atomicWriteText(filePath: string, content: string): Promise<void> {
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
-  }
-
-  // get_memory (memory_manager.py:118-132)
+  // get_memory (memory_manager.py:118-132). El repo devuelve el JSON crudo
+  // (o {} si el archivo no existía/corrompía); la normalización es dominio.
   async getMemory(user_id: string): Promise<UserMemory> {
-    const filePath = this.filePath(user_id);
-    try {
-      const data = await fs.readFile(filePath);
-      const decrypted = this.crypto.decrypt(data);
-      return normalizeMemorySchema(JSON.parse(decrypted));
-    } catch (e: any) {
-      if (e.code !== 'ENOENT') {
-        this.logger.warn(`Error leyendo memoria de ${user_id}: ${e.message}. Eliminando archivo corrupto.`);
-        try {
-          await fs.unlink(filePath);
-          const txtPath = path.join(SUMMARY_DIR, `${user_id}.txt`);
-          await fs.unlink(txtPath).catch(() => {});
-        } catch (unlinkErr) {
-           // Ignorar si no se puede borrar
-        }
-      }
-      return createEmptyMemory();
-    }
+    return normalizeMemorySchema(await this.repo.getMemory(user_id));
   }
 
-  // save_memory (memory_manager.py:134-143)
+  // save_memory (memory_manager.py:134-143). Normaliza antes de persistir.
   async saveMemory(user_id: string, memoryData: any): Promise<void> {
-    const filePath = this.filePath(user_id);
-    try {
-      const normalized = normalizeMemorySchema(memoryData);
-      const json = JSON.stringify(normalized);
-      await this.atomicWriteBytes(filePath, this.crypto.encrypt(json));
-    } catch (e: any) {
-      this.logger.error(`Error guardando memoria de ${user_id}: ${e.message}`);
-    }
+    await this.repo.saveMemory(user_id, normalizeMemorySchema(memoryData));
   }
 
   // add_interaction (memory_manager.py:163-183)
@@ -272,16 +232,7 @@ export class MemoryService implements OnModuleInit {
 
     mem.last_summary_time = Date.now() / 1000;
     await this.saveMemory(user_id, mem);
-    await this.saveSummaryPlaintext(user_id, mem.summary);
-  }
-
-  private async saveSummaryPlaintext(user_id: string, summaryText: string): Promise<void> {
-    const filePath = path.join(SUMMARY_DIR, `${user_id}.txt`);
-    try {
-      await this.atomicWriteText(filePath, summaryText ?? '');
-    } catch (e: any) {
-      this.logger.warn(`Error guardando resumen plano de ${user_id}: ${e.message}`);
-    }
+    await this.repo.saveSummaryPlaintext(user_id, mem.summary);
   }
 
   async getUsersWithPendingBuffer(): Promise<string[]> {
@@ -303,57 +254,16 @@ export class MemoryService implements OnModuleInit {
 
   /** Lista memorias para el WebUI: [{user_id, date, is_self}] ordenado por mtime desc. */
   async listMemories(): Promise<{ user_id: string; date: string; is_self: boolean }[]> {
-    let files: string[];
-    try {
-      files = await fs.readdir(MEMORY_DIR);
-    } catch {
-      return [];
-    }
-    const out: { user_id: string; date: string; is_self: boolean }[] = [];
-    const pad = (n: number) => String(n).padStart(2, '0');
-    for (const filename of files) {
-      if (!filename.endsWith('.enc')) continue;
-      const user_id = filename.replace(/\.enc$/, '');
-      try {
-        const d = new Date((await fs.stat(path.join(MEMORY_DIR, filename))).mtimeMs);
-        const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-        out.push({ user_id, date, is_self: user_id === BOT_SELF_ID });
-      } catch {
-        /* archivo desaparecido entre readdir y stat */
-      }
-    }
-    out.sort((a, b) => (a.date < b.date ? 1 : -1));
-    return out;
+    const rows = await this.repo.listMemories();
+    return rows.map((r) => ({ ...r, is_self: r.user_id === BOT_SELF_ID }));
   }
 
   async deleteMemory(user_id: string): Promise<void> {
-    const encPath = this.filePath(user_id);
-    const txtPath = path.join(SUMMARY_DIR, `${user_id}.txt`);
-    try {
-      await fs.unlink(encPath).catch(() => {});
-      await fs.unlink(txtPath).catch(() => {});
-    } catch (e) {
-      this.logger.error(`Error borrando memoria de ${user_id}: ${(e as Error).message}`);
-    }
+    await this.repo.deleteMemory(user_id);
   }
 
   async deleteAllMemories(): Promise<void> {
-    try {
-      const encFiles = await fs.readdir(MEMORY_DIR);
-      for (const file of encFiles) {
-        if (file.endsWith('.enc')) {
-          await fs.unlink(path.join(MEMORY_DIR, file)).catch(() => {});
-        }
-      }
-      const txtFiles = await fs.readdir(SUMMARY_DIR);
-      for (const file of txtFiles) {
-        if (file.endsWith('.txt')) {
-          await fs.unlink(path.join(SUMMARY_DIR, file)).catch(() => {});
-        }
-      }
-    } catch (e) {
-      this.logger.error(`Error borrando todas las memorias: ${(e as Error).message}`);
-    }
+    await this.repo.deleteAllMemories();
   }
 
   // get_memory_summary (memory_manager.py:273-295)
@@ -366,7 +276,7 @@ export class MemoryService implements OnModuleInit {
     let finalText = `Notas Básicas: ${notes}\n`;
     if (summary) finalText += `RESUMEN DETALLADO A LARGO PLAZO:\n${summary}\n`;
 
-    const queuedMsgs = await this.getQueuedInteractions(user_id);
+    const queuedMsgs = await this.queue.getQueuedInteractions(user_id);
     if (queuedMsgs.length) {
       finalText += `MEMORIA RECIENTE (No procesada):\n${queuedMsgs.join('\n')}\n`;
     }
@@ -407,87 +317,18 @@ export class MemoryService implements OnModuleInit {
     return out;
   }
 
-  // --- QUEUE ---
-  private async loadQueue(): Promise<QueueItem[]> {
-    try {
-      const raw = JSON.parse(await fs.readFile(QUEUE_FILE, 'utf-8'));
-      if (!Array.isArray(raw)) return [];
-      const normalized: QueueItem[] = [];
-      for (const item of raw) {
-        const safe = normalizeQueueItem(item);
-        if (safe) normalized.push(safe);
-      }
-      return normalized;
-    } catch {
-      return [];
-    }
-  }
-
-  private async saveQueue(queue: QueueItem[]): Promise<void> {
-    await fs.mkdir(path.dirname(QUEUE_FILE), { recursive: true });
-    const safe: QueueItem[] = [];
-    for (const item of queue) {
-      const s = normalizeQueueItem(item);
-      if (s) safe.push(s);
-    }
-    const tmp = `${QUEUE_FILE}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(safe, null, 2), 'utf-8');
-    await fs.rename(tmp, QUEUE_FILE);
-  }
-
-  // add_to_queue (memory_manager.py:382-402)
+  // --- QUEUE (delega en MemoryQueue; API pública intacta) ---
   async addToQueue(user_id: string, text: any): Promise<void> {
-    if (text == null) return;
-    const t = String(text).trim();
-    const uid = this.sanitizeUserId(user_id);
-    if (!t || !uid) return;
-
-    const queue = await this.loadQueue();
-    const now = Date.now() / 1000;
-
-    // Dedupe rápida: evita duplicados inmediatos por reintentos/cancelaciones.
-    for (let i = queue.length - 1; i >= Math.max(0, queue.length - 50); i--) {
-      const item = queue[i];
-      if (item.user_id === uid && item.text === t && now - item.timestamp <= QUEUE_DUPLICATE_WINDOW_SECONDS) {
-        return;
-      }
-    }
-
-    queue.push({ user_id: uid, text: t, timestamp: now });
-    await this.saveQueue(queue);
+    return this.queue.addToQueue(user_id, text);
   }
 
   async getQueuedInteractions(user_id: string): Promise<string[]> {
-    const queue = await this.loadQueue();
-    const uid = this.sanitizeUserId(user_id);
-    return queue.filter((i) => i.user_id === uid).map((i) => i.text);
+    return this.queue.getQueuedInteractions(user_id);
   }
 
-  // process_queue (memory_manager.py:411-438)
+  // process_queue (memory_manager.py:411-438). La política de promoción es
+  // addInteraction; la cola la invierte vía parámetro.
   async processQueue(): Promise<string[]> {
-    const queue = await this.loadQueue();
-    if (!queue.length) return [];
-
-    const now = Date.now() / 1000;
-    const newQueue: QueueItem[] = [];
-    const usersToSummarize = new Set<string>();
-
-    for (const item of queue) {
-      if (now - item.timestamp > QUEUE_TO_PERMANENT_DELAY_SECONDS) {
-        const shouldSum = await this.addInteraction(item.user_id, item.text);
-        if (shouldSum) usersToSummarize.add(item.user_id);
-      } else {
-        newQueue.push(item);
-      }
-    }
-
-    if (newQueue.length !== queue.length) await this.saveQueue(newQueue);
-    return [...usersToSummarize];
+    return this.queue.processQueue(this.addInteraction.bind(this));
   }
-}
-
-function arraysEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
 }

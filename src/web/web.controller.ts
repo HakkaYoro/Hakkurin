@@ -4,7 +4,7 @@
 import { Body, Controller, Get, Inject, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
 import { ConfigService } from '../common/config.service';
 import { BOT_SELF_ID, MemoryService } from '../memory/memory.service';
-import { DiscordService } from '../discord/discord.service';
+import { BOT_LIFECYCLE, type BotLifecycle } from './bot-lifecycle.port';
 import type { AiBrain } from '../ai/ai-brain.interface';
 import { ViewService } from './view.service';
 import { AuthGuard } from './auth.guard';
@@ -17,7 +17,7 @@ export class WebController {
   constructor(
     private readonly config: ConfigService,
     private readonly memory: MemoryService,
-    private readonly discord: DiscordService,
+    @Inject(BOT_LIFECYCLE) private readonly discord: BotLifecycle,
     @Inject('AiBrain') private readonly brain: AiBrain,
     private readonly view: ViewService,
   ) {}

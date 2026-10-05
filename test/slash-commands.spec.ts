@@ -1,4 +1,5 @@
 import { SlashCommandsService } from '../src/discord/slash-commands.service';
+import { MusicUiService } from '../src/discord/music-ui.service';
 
 // Registro + ruteo de slash commands y la vista de búsqueda de Navidrome
 // (snapshots por messageId + botones song_/album_/artist_).
@@ -19,10 +20,12 @@ function makeFakes(over: Record<string, any> = {}) {
     search: vi.fn(async () => ({})),
     getAlbumSongs: vi.fn(async () => []),
     getArtistRadio: vi.fn(async () => []),
+    getCoverUrl: vi.fn((id?: string) => (id ? `http://cover/${id}` : null)),
     ...over.navidrome,
   } as any;
-  const svc = new SlashCommandsService(music, navidrome);
-  return { svc, music, navidrome };
+  const musicUi = new MusicUiService(music, navidrome);
+  const svc = new SlashCommandsService(music, musicUi);
+  return { svc, music, navidrome, musicUi };
 }
 
 function chatInteraction(over: Record<string, any> = {}) {
@@ -109,36 +112,46 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     } as any;
   }
 
-  it('resultados: editReply con contenido numerado + filas de botones y snapshot guardado', async () => {
-    const { svc, navidrome } = makeFakes({
+  it('resultados: editReply con embed numerado + filas de botones y snapshot guardado', async () => {
+    const { musicUi, navidrome } = makeFakes({
       navidrome: {
-        search: vi.fn(async () => ({ song: [{ id: 's1', title: 'Track A', artist: 'Band' }] })),
+        search: vi.fn(async () => ({ song: [{ id: 's1', title: 'Track A', artist: 'Band', coverArt: 'cv1' }] })),
       },
     });
     const i = makeChat();
-    (svc as any).handleSearch(i, 'metal', false);
+    (musicUi as any).handleSearch(i, 'metal', false);
     await vi.waitFor(() => expect(i.editReply).toHaveBeenCalled());
     expect(navidrome.search).toHaveBeenCalledWith('metal', 5);
     const arg = i.editReply.mock.calls[0][0];
-    expect(arg.content).toContain('🔍 Resultados de Navidrome para: metal');
-    expect(arg.content).toContain('`1.` Track A - Band');
+    expect(arg.content).toBeUndefined();
+    const embed = arg.embeds[0].data;
+    expect(embed.title).toBe('🔍 Resultados de Navidrome: metal');
+    expect(embed.description).toContain('**🎵 Canciones**');
+    expect(embed.description).toContain('`1.` Track A - Band');
+    expect(embed.color).toBe(0x3498db);
+    expect(embed.footer).toEqual({ text: 'Hakkurei Music' });
+    expect(embed.thumbnail).toEqual({ url: 'http://cover/cv1' });
     expect(arg.components).toHaveLength(1); // solo fila de songs
     // Snapshot: el botón del mensaje funciona (lo prueba el test de abajo).
   });
 
-  it('sin resultados: editReply (texto plano) con "No se encontraron resultados" y SIN botones', async () => {
-    const { svc } = makeFakes();
+  it('sin resultados: MISMO embed con "No se encontraron resultados." y SIN botones', async () => {
+    const { musicUi } = makeFakes();
     const i = makeChat();
-    (svc as any).handleSearch(i, 'nada', true);
+    (musicUi as any).handleSearch(i, 'nada', true);
     await vi.waitFor(() => expect(i.editReply).toHaveBeenCalled());
     const arg = i.editReply.mock.calls[0][0];
-    expect(typeof arg).toBe('string'); // caso sin resultados: texto plano
-    expect(arg).toContain('📻 Resultados para Radio: nada');
-    expect(arg).toContain('No se encontraron resultados.');
+    const embed = arg.embeds[0].data;
+    expect(embed.title).toBe('📻 Radio: nada');
+    expect(embed.description).toBe('No se encontraron resultados.');
+    expect(embed.color).toBe(0x3498db);
+    expect(embed.footer).toEqual({ text: 'Hakkurei Music' });
+    expect(embed.thumbnail).toBeUndefined(); // sin coverArt no hay thumbnail
+    expect(arg.components).toBeUndefined(); // sin resultados: sin botones
   });
 
   it('botón song: songToItem + joinFromButton + enqueueAndPlay + confirmación', async () => {
-    const { svc, music, navidrome } = makeFakes({
+    const { svc, music, musicUi } = makeFakes({
       navidrome: {
         search: vi.fn(async () => ({ song: [{ id: 's1', title: 'Track A', artist: 'Band' }] })),
         getAlbumSongs: vi.fn(async () => [{ id: 'a1', title: 'Album Track' }]),
@@ -147,7 +160,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     });
     // Crear snapshot vía búsqueda.
     const search = makeChat();
-    (svc as any).handleSearch(search, 'metal', false);
+    (musicUi as any).handleSearch(search, 'metal', false);
     await vi.waitFor(() => expect(search.editReply).toHaveBeenCalled());
 
     const btn = {
@@ -168,11 +181,10 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     expect(music.joinFromButton).toHaveBeenCalledWith(btn.guild, btn.member);
     expect(music.enqueueAndPlay).toHaveBeenCalledWith(btn.guild, btn.channel, [expect.objectContaining({ id: 's1' })]);
     expect(btn.editReply).toHaveBeenCalledWith({ content: '✅ 1 añadida(s) a la cola.', components: [] });
-    void navidrome;
   });
 
   it('botón album y artist expanden canciones; radio activa modo radio', async () => {
-    const { svc, music, navidrome } = makeFakes({
+    const { svc, music, musicUi, navidrome } = makeFakes({
       navidrome: {
         search: vi.fn(async () => ({
           album: [{ id: 'al1', name: 'Disco' }],
@@ -183,7 +195,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
       },
     });
     const search = makeChat();
-    (svc as any).handleSearch(search, 'metal', true); // isRadio
+    (musicUi as any).handleSearch(search, 'metal', true); // isRadio
     await vi.waitFor(() => expect(search.editReply).toHaveBeenCalled());
 
     const albumBtn = {
@@ -212,7 +224,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
   });
 
   it('botón con usuario fuera de VC → mensaje y sin encolar', async () => {
-    const { svc, music } = makeFakes({
+    const { svc, music, musicUi } = makeFakes({
       navidrome: { search: vi.fn(async () => ({ song: [{ id: 's1', title: 'T', artist: 'A' }] })) },
       music: {
         songToItem: vi.fn(() => ({ type: 'navidrome', url: 'x', id: 's1' })),
@@ -220,7 +232,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
       },
     });
     const search = makeChat();
-    (svc as any).handleSearch(search, 'metal', false);
+    (musicUi as any).handleSearch(search, 'metal', false);
     await vi.waitFor(() => expect(search.editReply).toHaveBeenCalled());
     const btn = {
       isChatInputCommand: () => false, isMessageComponent: () => true, customId: 'song_0',

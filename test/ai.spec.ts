@@ -1,7 +1,6 @@
 import { vi } from 'vitest';
 import { GeminiProvider } from '../src/ai/gemini.provider';
 import { ConfigService } from '../src/common/config.service';
-import { MemoryService } from '../src/memory/memory.service';
 import type { InteractionContext } from '../src/ai/ai-brain.interface';
 
 // Verificación conductual del contrato AiBrain con un client @google/genai mockeado.
@@ -25,11 +24,15 @@ class MockConfig extends ConfigService {
 function makeProvider(generateContent: any): GeminiProvider {
   const config = new MockConfig();
   (config as any).store.gemini_keys = []; // evita construcción de cliente real en el ctor
-  const mem = {
-    getMemorySummary: async () => 'resumen',
-    getSelfMemory: async () => 'self mem',
-  } as any;
-  const provider = new GeminiProvider(config, mem);
+  // Fake del puerto ContextBuilder (el provider ya no conoce MemoryService).
+  const context = {
+    buildInteractionPrompt: async (ctx: any) => ({
+      prompt: 'PROMPT',
+      imageData: ctx.imageData ?? null,
+      imageMime: ctx.imageMimeType ?? null,
+    }),
+  };
+  const provider = new GeminiProvider(config, context);
   // stub del factory de cliente: toda rotación crea un mock que usa el mismo generateContent.
   (provider as any).createClient = () => ({ models: { generateContent } });
   (provider as any).keys = ['key-0', 'key-1'];

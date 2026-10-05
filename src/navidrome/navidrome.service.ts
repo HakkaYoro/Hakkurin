@@ -5,6 +5,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { ConfigService } from '../common/config.service';
+import { shuffle, toArray } from '../common/util';
 
 const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const CLIENT_NAME = 'hakkurin-bot';
@@ -110,20 +111,6 @@ export class NavidromeService {
     const params = new URLSearchParams({ ...this.authParams(), id: coverId, size: '500' });
     return `${base}/rest/getCoverArt?${params}`;
   }
-}
-
-function toArray<T>(x: T | T[] | undefined | null): T[] {
-  if (x == null) return [];
-  return Array.isArray(x) ? x : [x];
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 function stringifyVals(o: Record<string, string | number>): Record<string, string> {

@@ -2,6 +2,7 @@
 // DiscordService/Phase6 pasan el callback de envío y el test de API.
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { readFile } from 'fs/promises';
+import { nowSec } from '../common/util';
 
 const SLEEP_DURATION_S = 2 * 60 * 60; // 2h
 const STATUS_FILE = 'data/status_messages.json';
@@ -74,8 +75,4 @@ export class SleepService implements OnModuleInit {
     this.logger.warn('API sigue fallando. Durmiendo 2h más.');
     return { checked: true, recovered: false };
   }
-}
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
 }

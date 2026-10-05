@@ -1,26 +1,23 @@
-// Puerto de bot/music_manager.py. Estado por guild + reproducción con
-// @discordjs/voice. El evento AudioPlayerStatus.Idle REEMPLAZA al callback after=
-// y al guard is_fetching (music_manager.py:167-173,236). ffmpeg emite Opus 48k
-// estéreo directo (StreamType.OggOpus, sin re-encode JS); el volumen se aplica vía
-// filtro de ffmpeg. Un PassThrough de read-ahead (BUFFER_BYTES) amortigua el jitter
-// de fuente/red para evitar stutter (el buffer del OggDemuxer interno es ~320ms).
-// YouTube se resuelve vía sidecar yt-dlp (sidecar/extract_server.py); Navidrome
-// trae URL de stream directa.
+// Casos de uso de música (puerto de bot/music_manager.py). Estado por guild +
+// reproducción con @discordjs/voice. El evento AudioPlayerStatus.Idle REEMPLAZA
+// al callback after= y al guard is_fetching (music_manager.py:167-173,236).
+// Arquitectura hexagonal mínima: los puertos (StreamSource, AudioPipeline,
+// MusicPresenter) viven en music.ports.ts, el dominio en music.domain.ts y los
+// adaptadores concretos en sidecar.client.ts / ffmpeg.adapter.ts /
+// music.presenter.ts. La lógica de voz (connect, joinVC, attachVoiceDiagnostics,
+// ensurePlayer, tearDownConnection) se queda aquí: es la orquestación del
+// use-case. ponytail: extraer un VoiceGateway sería una interface con un solo
+// consumidor; upgrade path: si un segundo consumidor de voz aparece (p.ej. grabación),
+// mover connect/joinVC/attachVoiceDiagnostics detrás de un puerto.
 import { Injectable, Logger } from '@nestjs/common';
-import { spawn, type ChildProcess } from 'child_process';
-import { PassThrough } from 'stream';
 import {
   AudioPlayerStatus,
-  type AudioResource,
   createAudioPlayer,
-  createAudioResource,
   entersState,
   getVoiceConnection,
   joinVoiceChannel,
-  StreamType,
   VoiceConnectionDisconnectReason,
   VoiceConnectionStatus,
-  type AudioPlayer,
   type VoiceConnection,
 } from '@discordjs/voice';
 import {
@@ -33,63 +30,44 @@ import {
 } from 'discord.js';
 import { ConfigService } from '../common/config.service';
 import { NavidromeService, type NavidromeSong } from '../navidrome/navidrome.service';
+import { delay } from '../common/util';
+import {
+  isBusy,
+  newState,
+  type GuildMusicState,
+  type PlayerHandle,
+  type QueueItem,
+} from './music.domain';
+import type { AudioPipeline, MusicPresenter, StreamSource } from './music.ports';
+import { SidecarClient } from './sidecar.client';
+import { FfmpegAdapter } from './ffmpeg.adapter';
+import { DiscordPresenter } from './music.presenter';
 
-const SIDECAR_DEFAULT = 'http://localhost:7654';
+export type { QueueItem } from './music.domain';
+
 const EMPTY_VC_GRACE_MS = 5 * 60 * 1000; // 5 min → desconectar
-const VOLUME = 0.5;
-// Buffer de read-ahead entre ffmpeg y el OggDemuxer. Sin coste de latencia (sólo
-// gobierna backpressure al writer); aguanta ~1-2min de Opus ante un stall de fuente.
-const BUFFER_BYTES = 1024 * 1024;
 // Pre-buffer (anti-stutter): pausa tras spawn ffmpeg para que llene el PassThrough
 // antes de sonar. CPU modesto (i5-2400) + canal de voz 64k → 5s de colchón.
 const PREBUFFER_MS = 5_000;
-
-export interface QueueItem {
-  type: 'youtube' | 'navidrome';
-  url: string;
-  id?: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  cover_url?: string | null;
-}
-
-interface GuildMusicState {
-  queue: QueueItem[];
-  currentSong: string | null;
-  currentArtist: string;
-  currentAlbum: string;
-  currentCoverUrl: string | null; // cover de la canción actual → thumbnail del embed de /queue
-  skipVotes: Set<string>;
-  emptySince: number | null;
-  playHistory: QueueItem[];
-  isRadioMode: boolean;
-  radioPlayedIds: Set<string>;
-  isFetching: boolean;
-  player: AudioPlayer | null;
-  connection: VoiceConnection | null;
-  textChannel: TextChannel | null;
-  ffmpeg: ChildProcess | null; // proceso ffmpeg del track actual; SIGKILL al cambiar/cortar
-}
 
 @Injectable()
 export class MusicService {
   private readonly logger = new Logger(MusicService.name);
   private readonly guilds = new Map<string, GuildMusicState>();
+  private readonly source: StreamSource;
+  private readonly pipeline: AudioPipeline;
+  private readonly presenter: MusicPresenter;
 
   constructor(
     private readonly config: ConfigService,
     private readonly navidrome: NavidromeService,
-  ) {}
-
-  /**
-   * Ocupado = hay player Y su estado no es Idle. Tras player.play() el player pasa
-   * por Buffering antes de Playing; tratar cualquier estado no-Idle como ocupado
-   * evita doble play / canción cortada (equivalente al is_playing() de discord.py,
-   * que es true desde el instante de play()). isFetching cubre la ventana del await.
-   */
-  private isBusy(s: GuildMusicState): boolean {
-    return !!s.player && s.player.state.status !== AudioPlayerStatus.Idle;
+  ) {
+    // ponytail: adaptadores concretos inline — una implementación por puerto, sin
+    // fábrica ni DI especulativa. Upgrade path: inyectarlos por constructor si
+    // aparece una segunda implementación.
+    this.source = new SidecarClient(config);
+    this.pipeline = new FfmpegAdapter();
+    this.presenter = new DiscordPresenter();
   }
 
   private state(guildId: string): GuildMusicState {
@@ -146,7 +124,7 @@ export class MusicService {
   /** Destruye la conexión + mata ffmpeg + limpia state. Centraliza el teardown. */
   private tearDownConnection(guildId: string, connection: VoiceConnection, why: string): void {
     const s = this.guilds.get(guildId);
-    if (s?.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
+    if (s) this.pipeline.killCurrent(s);
     try { connection.destroy(); } catch {}
     if (s) s.connection = null;
     this.logger.warn(`VC ${guildId}: ${why}.`);
@@ -230,7 +208,7 @@ export class MusicService {
     const s = this.state(guild.id);
     // TEMP(diagnóstico avance): si Idle dispara pero playNext aborta, estos logs lo revelan.
     if (s.isFetching) { this.logger.debug('playNext abort: isFetching'); return; }
-    if (this.isBusy(s)) { this.logger.debug('playNext abort: isBusy'); return; }
+    if (isBusy(s)) { this.logger.debug('playNext abort: isBusy'); return; }
 
     s.isFetching = true;
     s.textChannel = channel;
@@ -252,8 +230,8 @@ export class MusicService {
         s.playHistory.push(item);
         if (s.playHistory.length > 5) s.playHistory.shift();
 
-        const streamUrl = await this.resolveStreamUrl(item);
-        const resource = this.makeResource(guild.id, streamUrl);
+        const { streamUrl } = await this.source.resolve(item);
+        const resource = this.pipeline.create(s, streamUrl);
         if (!resource) throw new Error('No se pudo crear el recurso de audio.');
 
         if (item.type === 'navidrome') {
@@ -275,11 +253,9 @@ export class MusicService {
         await delay(PREBUFFER_MS);
         player.play(resource);
 
-        if (item.type === 'navidrome' && item.cover_url) {
-          await this.sendNowPlayingEmbed(channel, s.currentSong, item.cover_url);
-        } else {
-          await sendText(channel, `🎶 Reproduciendo ahora: **${s.currentSong}**`);
-        }
+        // Embed sólo para Navidrome con cover; el resto, texto plano.
+        const cover = item.type === 'navidrome' ? (item.cover_url ?? null) : null;
+        await this.presenter.nowPlaying(channel, s.currentSong, cover);
       } else {
         s.currentSong = null;
         s.currentCoverUrl = null;
@@ -287,7 +263,7 @@ export class MusicService {
     } catch (e) {
       errored = true;
       this.logger.error(`Error reproduciendo música: ${(e as Error).message}`);
-      await sendText(channel, `Ocurrió un error al reproducir: ${(e as Error).message}`);
+      await this.presenter.playbackError(channel, (e as Error).message);
     } finally {
       s.isFetching = false;
     }
@@ -296,7 +272,7 @@ export class MusicService {
     if (errored) void this.playNext(guild, channel);
   }
 
-  private ensurePlayer(guildId: string): AudioPlayer {
+  private ensurePlayer(guildId: string): PlayerHandle {
     const s = this.state(guildId);
     if (!s.player) {
       const player = createAudioPlayer();
@@ -306,9 +282,13 @@ export class MusicService {
         // Borrar tras verificar el Fix 1 en vivo.
         this.logger.debug(`player Idle → playNext (guild ${guildId})`);
         const st = this.state(guildId);
-        if (st.ffmpeg) { try { st.ffmpeg.kill('SIGKILL'); } catch {} st.ffmpeg = null; }
+        this.pipeline.killCurrent(st);
         st.isFetching = false;
-        if (st.textChannel) void this.playNext(st.textChannel.guild, st.textChannel);
+        if (st.textChannel) {
+          // textChannel se guardó como ChannelHandle (dominio puro); aquí es el
+          // TextChannel real que playNext asignó.
+          void this.playNext(st.textChannel.guild, st.textChannel as TextChannel);
+        }
       });
       player.on('error', (e) => this.logger.error(`AudioPlayer error: ${e.message}`));
       s.player = player;
@@ -318,88 +298,6 @@ export class MusicService {
     // una reconexión el player cacheado queda sin suscripción → AutoPaused → silencio.
     if (s.connection) s.connection.subscribe(s.player);
     return s.player;
-  }
-
-  private makeResource(guildId: string, streamUrl: string): AudioResource | null {
-    if (!streamUrl) return null;
-    const s = this.state(guildId);
-    // Cortar cualquier ffmpeg previo (skip/stop/reemplazo de track).
-    if (s.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
-
-    // ffmpeg → Opus estéreo 48k directo (sin re-encode JS/opusscript). Volumen vía
-    // filtro de ffmpeg. Salida por pipe a un PassThrough con read-ahead grande.
-    const ff = spawn('ffmpeg', [
-      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-      // read-ahead del thread de input: sin esto puede starvarse periódicamente y
-      // producir gaps que el PassThrough (que vive después de ffmpeg) no puede tapar.
-      '-thread_queue_size', '512',
-      '-i', streamUrl,
-      // Encoding ligero para CPU modesto (i5-2400): libopus@96k sobra para el canal
-      // de voz de Discord (64k); compression_level bajo = mucho menos CPU con pérdida
-      // mínima de calidad. -f opus mantiene el container Ogg/Opus que lee @discordjs/voice.
-      '-c:a', 'libopus', '-b:a', '96k', '-compression_level', '3',
-      '-f', 'opus', '-ar', '48000', '-ac', '2',
-      '-filter:a', `volume=${VOLUME}`,
-      '-loglevel', 'error', '-hide_banner', 'pipe:1',
-    ]);
-    s.ffmpeg = ff;
-    // Drenar stderr: debug + evita que el pipe kernel (64KB) se llene en bucles de
-    // error y atasque stdout (→ underrun → stutter).
-    ff.stderr.on('data', (d: Buffer) => this.logger.debug(`ffmpeg: ${d.toString().trim()}`));
-    ff.on('error', (e) => this.logger.error(`ffmpeg spawn falló: ${e.message}. ¿ffmpeg instalado?`));
-    ff.once('exit', () => { if (s.ffmpeg === ff) s.ffmpeg = null; });
-
-    // Buffer de read-ahead: amortigua jitter de fuente/red (sin coste de latencia:
-    // highWaterMark sólo gobierna el backpressure al writer).
-    const buf = new PassThrough({ highWaterMark: BUFFER_BYTES });
-    ff.stdout.pipe(buf);
-    ff.stdout.on('error', () => {}); // tragar EPIPE tras kill
-    buf.on('error', () => {});
-
-    // Forzar EOF del buffer al cerrar ffmpeg. Sin esto el PassThrough puede no
-    // propagar el fin → el AudioResource nunca termina → el player no pasa a Idle
-    // → la cola no avanza (bug de avance + radio). 'close' se emite siempre
-    // (natural o tras SIGKILL) y tras el cierre de los stdio, así que buf ya recibió
-    // todo el Opus. Idempotente si el pipe ya había terminado. Si esto no dispara
-    // Idle en vivo, subir a buf.destroy().
-    ff.once('close', () => { try { buf.end(); } catch {} });
-
-    return createAudioResource(buf, { inputType: StreamType.OggOpus, inlineVolume: false });
-  }
-
-  private async resolveStreamUrl(item: QueueItem): Promise<string> {
-    if (item.type === 'navidrome') return item.url;
-    // YouTube → sidecar yt-dlp extrae la URL directa de stream.
-    const sidecar = this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
-    const url = `${sidecar}/extract?url=${encodeURIComponent(item.url)}`;
-
-    let res: Response;
-    try {
-      // ponytail: AbortSignal.timeout (stdlib) — bounda la llamada; un sidecar
-      // colgado no bloquea playNext indefinidamente.
-      res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-    } catch (e: any) {
-      // "fetch failed" esconde la razón en e.cause (ECONNREFUSED/ENOTFOUND/TimeoutError…).
-      const c = e?.cause;
-      const reason = c?.code ?? c?.syscall ?? c?.hostname ?? e?.name ?? e?.message;
-      this.logger.warn(`Sidecar yt-dlp falló para ${item.url}: ${reason}`);
-      return '';
-    }
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      // 502 = yt-dlp desactualizado/bot-blocked; 404 = sin resultados; 500 = URL no resuelta.
-      this.logger.warn(`Sidecar ${res.status} para ${item.url}: ${body.slice(0, 200)}`);
-      return '';
-    }
-
-    const data: any = await res.json().catch(() => null);
-    if (!data?.stream_url) {
-      this.logger.warn(`Sidecar 200 sin stream_url para ${item.url}`);
-      return '';
-    }
-    if (!item.title && data.title) item.title = data.title;
-    return data.stream_url;
   }
 
   // --- Radio infinita (music_manager.py:260-313) ---
@@ -429,7 +327,7 @@ export class MusicService {
         added++;
       }
     }
-    if (added > 0) await sendText(channel, `📻 *Radio: Añadidas ${added} canciones en la cola.*`);
+    if (added > 0) await this.presenter.radioAdded(channel, added);
   }
 
   /** Activa modo radio para un guild (navidrome_ui.py:57-58,69-70,82-83). */
@@ -465,7 +363,7 @@ export class MusicService {
     const guild = interaction.guild!;
     const channel = this.textChannel(interaction);
     if (!guild || !channel) return;
-    if (!this.isBusy(s) && !s.isFetching) {
+    if (!isBusy(s) && !s.isFetching) {
       void this.playNext(guild, channel);
       await safeFollowup(interaction, '▶️ Iniciando reproducción...');
     } else {
@@ -484,7 +382,7 @@ export class MusicService {
     const guild = interaction.guild!;
     const channel = this.textChannel(interaction);
     if (!guild || !channel) return;
-    if (!this.isBusy(s) && !s.isFetching) {
+    if (!isBusy(s) && !s.isFetching) {
       void this.playNext(guild, channel);
       await safeFollowup(interaction, '▶️ Iniciando reproducción de Navidrome...');
     } else {
@@ -558,7 +456,7 @@ export class MusicService {
     const s = this.state(guild.id);
     for (const it of items) s.queue.push(it);
     s.textChannel = channel;
-    if (!this.isBusy(s) && !s.isFetching) void this.playNext(guild, channel);
+    if (!isBusy(s) && !s.isFetching) void this.playNext(guild, channel);
   }
 
   async queueInfo(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -648,7 +546,7 @@ export class MusicService {
     s.currentArtist = 'Unknown Artist';
     s.isFetching = false;
     s.textChannel = null;
-    if (s.ffmpeg) { try { s.ffmpeg.kill('SIGKILL'); } catch {} s.ffmpeg = null; }
+    this.pipeline.killCurrent(s);
     if (s.player) { try { s.player.stop(); } catch {} s.player = null; }
   }
 
@@ -658,45 +556,6 @@ export class MusicService {
     const members = (ch as any).members as Map<string, GuildMember>;
     return [...members.values()].filter((m) => !m.user?.bot);
   }
-
-  private async sendNowPlayingEmbed(channel: TextChannel, title: string, coverUrl: string): Promise<void> {
-    const embed = new EmbedBuilder()
-      .setTitle('🎶 Reproduciendo ahora')
-      .setDescription(`**${title}**`)
-      .setColor(0x3498db) // blue
-      .setThumbnail(coverUrl)
-      .setFooter({ text: 'Hakkurei Music' });
-
-    try {
-      await channel.send({ embeds: [embed] });
-    } catch {
-      await sendText(channel, `🎶 Reproduciendo ahora: **${title}**`);
-    }
-  }
-}
-
-function newState(): GuildMusicState {
-  return {
-    queue: [],
-    currentSong: null,
-    currentArtist: 'Unknown Artist',
-    currentAlbum: 'Unknown Album',
-    currentCoverUrl: null,
-    skipVotes: new Set(),
-    emptySince: null,
-    playHistory: [],
-    isRadioMode: false,
-    radioPlayedIds: new Set(),
-    isFetching: false,
-    player: null,
-    connection: null,
-    textChannel: null,
-    ffmpeg: null,
-  };
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function safeFollowup(interaction: ChatInputCommandInteraction, content: string, ephemeral = false): Promise<void> {
@@ -708,14 +567,5 @@ async function safeFollowup(interaction: ChatInputCommandInteraction, content: s
     }
   } catch {
     /* interacción expirada */
-  }
-}
-
-async function sendText(channel: TextChannel | null, content: string): Promise<void> {
-  if (!channel) return;
-  try {
-    await (channel as any).send(content);
-  } catch {
-    /* canal no disponible */
   }
 }

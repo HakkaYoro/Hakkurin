@@ -4,6 +4,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { AiBrain } from '../ai/ai-brain.interface';
 import { MemoryService } from '../memory/memory.service';
+import { nowSec } from '../common/util';
 
 const SESSION_TIMEOUT_S = 5 * 60; // 5 min
 const HISTORY_WINDOW_S = 3600; // 1h
@@ -200,8 +201,4 @@ export class ConversationService {
       this.endSession(channelId, userId);
     }
   }
-}
-
-function nowSec(): number {
-  return Math.floor(Date.now() / 1000);
 }
