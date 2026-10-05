@@ -1,17 +1,34 @@
 import { vi } from 'vitest';
-import { PermissionFlagsBits } from 'discord.js';
-import { DiscordService } from '../src/discord/discord.service';
-import { ConversationService } from '../src/conversation/conversation.service';
-import { StealthDmService } from '../src/discord/stealth-dm.service';
-import { SleepService } from '../src/discord/sleep.service';
-import { ActionParserService } from '../src/scheduler/action-parser.service';
+import { DiscordAPIError, PermissionFlagsBits } from 'discord.js';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DiscordService } from '../src/discord/infrastructure/discord.service';
+import { SmartResponseService } from '../src/discord/application/smart-response.service';
+import { ReminderService } from '../src/discord/application/reminder.service';
+import { HolidayService } from '../src/discord/application/holiday.service';
+import { ConversationService } from '../src/conversation/application/conversation.service';
+import { StealthDmService } from '../src/discord/application/stealth-dm.service';
+import { SleepService } from '../src/discord/application/sleep.service';
+import { ActionParserService } from '../src/scheduler/application/action-parser.service';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/crypto.service';
-import { MemoryService, BOT_SELF_ID } from '../src/memory/memory.service';
+import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
+import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
+import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { MemoryService, BOT_SELF_ID } from '../src/memory/application/memory.service';
+import { MemoryEventsListener } from '../src/memory/application/memory-events.listener';
+import {
+  MessageTransportPort,
+  SendOptions,
+} from '../src/discord/domain/ports/message-transport.port';
+import { BotStatePort } from '../src/discord/domain/ports/bot-state.port';
+import { UrlContext, UrlEnricherPort } from '../src/discord/domain/ports/url-enricher.port';
+import { HolidayStoreAdapter } from '../src/discord/infrastructure/persistence/holiday-store.adapter';
+import { SleepStoreAdapter } from '../src/discord/infrastructure/persistence/sleep-store.adapter';
 
 // Pipeline completo de DiscordService con dependencias reales donde es barato
-// (conversación, memoria cifrada real en tmp, stealth-dm, sleep, parser) y fakes
-// de comportamiento en los bordes de red (cliente de discord.js, brain, music).
+// (conversación, memoria cifrada real en tmp, stores de disco, parser) y fakes
+// en los bordes de red (cliente de discord.js, brain, music).
+
+const EMPTY_URL_CTX: UrlContext = { text: null, thumbnailData: null, thumbnailMime: null };
 
 class MockConfig extends ConfigService {
   store: Record<string, any> = { reply_probability: 0 }; // sin trigger aleatorio: determinismo
@@ -38,6 +55,7 @@ function makeClient(): any {
     isReady: () => true,
     user: { id: 'botid', tag: 'Hakkurin#0001', setPresence: vi.fn(async () => {}) },
     channels: { cache: new Map() },
+    guilds: { cache: new Map() },
     users: { fetch: vi.fn(async () => ({ username: 'Bob' })) },
     destroy: vi.fn(async () => {}),
   };
@@ -46,15 +64,77 @@ function makeClient(): any {
 function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   const config = new MockConfig();
   Object.assign(config.store, store);
-  const memory = new MemoryService(new CryptoService());
+  const cryptoSvc = new CryptoService();
+  const events = new EventEmitter2();
+  const memory = new MemoryService(cryptoSvc, new MemoryRepository(cryptoSvc), new MemoryQueue(), events);
   const conversation = new ConversationService(brain, memory);
+  const parser = new ActionParserService();
+  const music = { getNowPlaying: vi.fn(() => null), checkEmptyVoiceChannels: vi.fn(async () => {}) } as any;
+
+  // Mismo ciclo que en producción (DiscordService ↔ use-cases vía puertos): los
+  // proxies delegan en la instancia que se crea un poco más abajo.
+  const ref: { svc?: DiscordService } = {};
+  class LazyTransport extends MessageTransportPort {
+    isChannelSendable(id: string) {
+      return ref.svc!.isChannelSendable(id);
+    }
+    async sendTyping(id: string) {
+      return ref.svc!.sendTyping(id);
+    }
+    async sendToChannel(id: string, content: string, opts?: SendOptions) {
+      return ref.svc!.sendToChannel(id, content, opts);
+    }
+    async sendDm(userId: string, content: string, guildId?: string | null) {
+      return ref.svc!.sendDm(userId, content, guildId);
+    }
+    async fetchImage(url: string) {
+      return ref.svc!.fetchImage(url);
+    }
+    async fetchUsername(id: string) {
+      return ref.svc!.fetchUsername(id);
+    }
+    logDmOutput(id: string, userName: string, userId: string, msgText: string) {
+      ref.svc!.logDmOutput(id, userName, userId, msgText);
+    }
+    getBotUserId() {
+      return ref.svc!.getBotUserId();
+    }
+  }
+  class LazyState extends BotStatePort {
+    async updateBotStatus(s?: 'online' | 'idle' | 'dnd', a?: string) {
+      return ref.svc!.updateBotStatus(s, a);
+    }
+    setLastActiveChannel(id: string) {
+      ref.svc!.setLastActiveChannel(id);
+    }
+    async performMemorySummarization(uid: string) {
+      return ref.svc!.performMemorySummarization(uid);
+    }
+  }
+  const transport = new LazyTransport();
+  const state = new LazyState();
+  const urlEnricher = { enrich: vi.fn(async () => EMPTY_URL_CTX) } as unknown as UrlEnricherPort;
+
+  const stealthDm = new StealthDmService(transport);
+  const sleep = new SleepService(new SleepStoreAdapter(), transport);
+  // Mismo cableado que MemoryModule en producción: el listener encola la
+  // respuesta del bot al recibir InteractionAnswered.
+  new MemoryEventsListener(events, memory, config).listen(events);
+  const smartResponse = new SmartResponseService(
+    config, conversation, brain, memory,
+    transport, state, urlEnricher, stealthDm, sleep, music, events,
+  );
+  const reminders = new ReminderService(memory, brain, parser, transport);
+  const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());
   const svc = new DiscordService(
     config, conversation, brain, memory,
-    new StealthDmService(), new SleepService(),
-    { getNowPlaying: vi.fn(() => null), checkEmptyVoiceChannels: vi.fn(async () => {}) } as any,
+    stealthDm, sleep,
+    music,
     { handle: vi.fn(async () => {}), register: vi.fn(async () => {}) } as any,
-    new ActionParserService(),
+    parser,
+    smartResponse, reminders, holidays,
   );
+  ref.svc = svc;
   return { svc, config, memory, conversation, brain, client: makeClient() };
 }
 
@@ -65,6 +145,7 @@ function fakeMsg(over: Record<string, any> = {}): any {
     channel: {
       id: 'c1',
       type: 0,
+      isTextBased: () => true,
       sendTyping: vi.fn(async () => {}),
       send: vi.fn(async () => {}),
       messages: { cache: new Map() },
@@ -120,6 +201,7 @@ describe('DiscordService — pipeline de mensajes', () => {
 
     const mentions = { has: vi.fn(() => true), users: new Map() };
     const msg = fakeMsg({ mentions });
+    client.channels.cache.set('c1', msg.channel);
     void (svc as any).onMessage(msg);
     await vi.advanceTimersByTimeAsync(45000);
 
@@ -153,8 +235,10 @@ describe('DiscordService — pipeline de mensajes', () => {
   it('intent ignore → no envía nada y no toca memoria', async () => {
     const { svc, memory } = makeService();
     await memoryReady(memory);
-    (svc as any).client = makeClient();
+    const client = makeClient();
+    (svc as any).client = client;
     const msg = fakeMsg({ mentions: { has: vi.fn(() => true), users: new Map() } });
+    client.channels.cache.set('c1', msg.channel);
     void (svc as any).onMessage(msg);
     await vi.advanceTimersByTimeAsync(45000);
     expect(msg.channel.send).not.toHaveBeenCalled();
@@ -211,7 +295,7 @@ describe('DiscordService — pipeline de mensajes', () => {
   });
 });
 
-describe('DiscordService — presencia y envío por callback', () => {
+describe('DiscordService — presencia y envío', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('updateBotStatus mapea online/idle/dnd con textos por defecto', async () => {
@@ -234,19 +318,65 @@ describe('DiscordService — presencia y envío por callback', () => {
     expect(client.user.setPresence).not.toHaveBeenCalled();
   });
 
-  it('sendMessageCallback: canal cacheado → typing + send; desconocido → silencio', async () => {
+  it('sendToChannel/sendMessageCallback: canal cacheado → typing + send; desconocido → false silencioso', async () => {
     vi.useFakeTimers();
     const { svc, client } = makeService();
     (svc as any).client = client;
     const channel = { isTextBased: () => true, sendTyping: vi.fn(async () => {}), send: vi.fn(async () => {}) };
     client.channels.cache.set('cX', channel);
 
-    void svc.sendMessageCallback('cX', 'hola mundial');
-    await vi.advanceTimersByTimeAsync(10000);
+    await expect(svc.sendToChannel('cX', 'hola mundial')).resolves.toBe(true);
+    expect(channel.sendTyping).not.toHaveBeenCalled(); // sin opts.typing no hay pausa
     expect(channel.send).toHaveBeenCalledWith('hola mundial');
 
-    await expect(svc.sendMessageCallback('desconocido', 'x')).resolves.toBeUndefined();
+    void svc.sendMessageCallback('cX', 'hola con typing');
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(channel.send).toHaveBeenCalledWith('hola con typing');
+    expect(channel.sendTyping).toHaveBeenCalled();
+
+    await expect(svc.sendToChannel('desconocido', 'x')).resolves.toBe(false);
     vi.useRealTimers();
+  });
+
+  it('sendToChannel con replyTo: reintenta sin cita si el mensaje referenciado fue borrado', async () => {
+    const { svc, client } = makeService();
+    (svc as any).client = client;
+    const channel: any = { isTextBased: () => true, send: vi.fn(async () => {}) };
+    client.channels.cache.set('c1', channel);
+    // Error de API con code 10008 (mensaje referenciado borrado), como lo emite discord.js.
+    const boom = Object.create(DiscordAPIError.prototype);
+    boom.message = 'Unknown Message';
+    boom.code = 10008;
+    boom.status = 404;
+    channel.send = vi.fn()
+      .mockRejectedValueOnce(boom)
+      .mockResolvedValueOnce({});
+
+    await expect(
+      svc.sendToChannel('c1', 'respuesta', { replyTo: { messageId: 'm9', channelId: 'c1' } }),
+    ).resolves.toBe(true);
+    expect(channel.send).toHaveBeenCalledTimes(2);
+    expect(channel.send.mock.calls[0][0]).toMatchObject({ content: 'respuesta', messageReference: { messageId: 'm9' } });
+    expect(channel.send.mock.calls[1][0]).toBe('respuesta');
+  });
+
+  it('sendDm: miembro del guild primero; sin guild cae al usuario global', async () => {
+    const { svc, client } = makeService();
+    (svc as any).client = client;
+    const memberSend = vi.fn(async () => {});
+    const guild = { members: { fetch: vi.fn(async () => ({ send: memberSend })) } };
+    client.guilds.cache.set('g1', guild);
+
+    await expect(svc.sendDm('42', 'hola oculto', 'g1')).resolves.toBe(true);
+    expect(guild.members.fetch).toHaveBeenCalledWith('42');
+    expect(memberSend).toHaveBeenCalledWith('hola oculto');
+    expect(client.users.fetch).not.toHaveBeenCalled();
+
+    const userSend = vi.fn(async () => {});
+    (client.users.fetch as any).mockResolvedValue({ send: userSend });
+    await expect(svc.sendDm('43', 'dm global', null)).resolves.toBe(true);
+    expect(client.users.fetch).toHaveBeenCalledWith('43');
+    expect(userSend).toHaveBeenCalledWith('dm global');
   });
 
   it('isAdmin: solo miembros con permiso Administrator', () => {
@@ -357,9 +487,11 @@ describe('DiscordService — memoria y loops', () => {
     await svc.recoveryCheck();
     expect(channel.send).not.toHaveBeenCalled();
 
-    // Dormido y vencido.
+    // Dormido y vencido. enterSleep pasa por el pausa humanizada del transporte
+    // → avanzar los timers en paralelo para completar el envío.
     const sleep: SleepService = (svc as any).sleep;
-    await sleep.enterSleep(async () => {});
+    void sleep.enterSleep('c9');
+    await vi.advanceTimersByTimeAsync(10000);
     (sleep as any).sleepUntil = Math.floor(Date.now() / 1000) - 1;
     void svc.recoveryCheck();
     await vi.advanceTimersByTimeAsync(10000);

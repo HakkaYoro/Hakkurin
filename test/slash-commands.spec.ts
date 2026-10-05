@@ -1,5 +1,5 @@
-import { SlashCommandsService } from '../src/discord/slash-commands.service';
-import { MusicUiService } from '../src/discord/music-ui.service';
+import { SlashCommandsService } from '../src/discord/infrastructure/slash-commands.service';
+import { MusicUiService } from '../src/discord/infrastructure/music-ui.service';
 
 // Registro + ruteo de slash commands y la vista de búsqueda de Navidrome
 // (snapshots por messageId + botones song_/album_/artist_).

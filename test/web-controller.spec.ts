@@ -1,8 +1,11 @@
-import { WebController } from '../src/web/web.controller';
+import { WebController } from '../src/web/infrastructure/web.controller';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/crypto.service';
-import { MemoryService } from '../src/memory/memory.service';
-import { BOT_SELF_ID } from '../src/memory/memory.service';
+import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
+import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
+import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { MemoryService } from '../src/memory/application/memory.service';
+import { BOT_SELF_ID } from '../src/memory/application/memory.service';
 
 // Endpoints de la WebUI (server-rendered): config con secretos write-only,
 // memories y restart. AuthGuard/ViewService ya tienen su spec en web.spec.ts.
@@ -25,7 +28,8 @@ class MockConfig extends ConfigService {
 
 function makeController() {
   const config = new MockConfig();
-  const memory = new MemoryService(new CryptoService());
+  const cryptoSvc = new CryptoService();
+  const memory = new MemoryService(cryptoSvc, new MemoryRepository(cryptoSvc), new MemoryQueue(), new EventEmitter2());
   const discord = { forceShutdownAndSummarize: vi.fn(async () => {}), restart: vi.fn(async () => {}) } as any;
   const brain = { reloadConfig: vi.fn(async () => {}) } as any;
   const view = { render: vi.fn(async () => '<html>ok</html>') } as any;

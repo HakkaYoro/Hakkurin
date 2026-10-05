@@ -1,4 +1,4 @@
-import { searchDdg } from '../src/ai/ddg-search';
+import { searchDdg } from '../src/ai/infrastructure/ddg-search';
 
 // Scraping de DDG: parseo del HTML, decodificación uddg, fallback de query corta
 // y manejo de errores (el mensaje va al modelo, nunca lanza).

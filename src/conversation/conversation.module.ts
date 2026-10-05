@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConversationService } from './conversation.service';
+import { ConversationService } from './application/conversation.service';
 import { AiModule } from '../ai/ai.module';
 import { MemoryModule } from '../memory/memory.module';
 

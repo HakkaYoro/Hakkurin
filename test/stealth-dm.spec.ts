@@ -1,10 +1,16 @@
-import { StealthDmService } from '../src/discord/stealth-dm.service';
+import { vi } from 'vitest';
+import { StealthDmService } from '../src/discord/application/stealth-dm.service';
+import { MessageTransportPort } from '../src/discord/domain/ports/message-transport.port';
 
 // El "DM invisible" usa regex fieles al fuente Python (docs/03 §3).
 // La variante de cierre admite [/MD], /MD] y EOF. Nunca debe romper el envío
 // público si el cierre está malformado.
 
-const svc = new StealthDmService();
+function makeTransport(over: Partial<MessageTransportPort> = {}): MessageTransportPort {
+  return { sendDm: vi.fn(async () => true), ...over } as unknown as MessageTransportPort;
+}
+
+const svc = new StealthDmService(makeTransport());
 
 describe('StealthDmService extract/strip', () => {
   it('extrae un bloque bien cerrado y lo quita del texto público', () => {
@@ -41,64 +47,51 @@ describe('StealthDmService extract/strip', () => {
   });
 });
 
-// Envío real de DMs: scheduleDelayedDms (3s) + sendStealthDm con fakes de discord.js.
+// Envío real de DMs: scheduleDelayedDms (3s) delega en MessageTransportPort.sendDm.
 describe('StealthDmService — envío', () => {
+  let transport: MessageTransportPort;
   let svc: StealthDmService;
-  beforeEach(() => { svc = new StealthDmService(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  function fakeMessage(guild: any) {
-    return { guild } as any;
-  }
-
-  it('sendStealthDm resuelve por guild.members.fetch y envía el DM', async () => {
-    const send = vi.fn(async () => {});
-    const message = fakeMessage({ members: { fetch: vi.fn(async () => ({ send })) } });
-    const client = { users: { fetch: vi.fn() } };
-    await svc.sendStealthDm(message, '123', 'hola oculto', client as any);
-    expect(send).toHaveBeenCalledWith('hola oculto');
-    expect(client.users.fetch).not.toHaveBeenCalled();
+  beforeEach(() => {
+    transport = makeTransport();
+    svc = new StealthDmService(transport);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it('no está en el guild → cae a client.users.fetch', async () => {
-    const send = vi.fn(async () => {});
-    const message = fakeMessage(null);
-    const client = { users: { fetch: vi.fn(async () => ({ send })) } };
-    await svc.sendStealthDm(message, '456', 'dm', client as any);
-    expect(client.users.fetch).toHaveBeenCalledWith('456');
-    expect(send).toHaveBeenCalledWith('dm');
+  it('sendStealthDm delega en el transporte con el guild del mensaje', async () => {
+    await svc.sendStealthDm('123', 'hola oculto', 'g1');
+    expect(transport.sendDm).toHaveBeenCalledWith('123', 'hola oculto', 'g1');
   });
 
-  it('id no numérico → no-op silencioso', async () => {
-    const fetchGuild = vi.fn();
-    const message = fakeMessage({ members: { fetch: fetchGuild } });
-    const client = { users: { fetch: vi.fn() } };
-    await svc.sendStealthDm(message, 'no-soy-id', 'x', client as any);
-    expect(fetchGuild).not.toHaveBeenCalled();
-    expect(client.users.fetch).not.toHaveBeenCalled();
+  it('sendDm falla (DMs cerrados) → no lanza y sin log de éxito', async () => {
+    (transport.sendDm as any) = vi.fn(async () => false);
+    await expect(svc.sendStealthDm('123', 'x', null)).resolves.toBeUndefined();
+    expect(transport.sendDm).toHaveBeenCalled();
   });
 
-  it('fetch falla en ambos → nunca lanza', async () => {
-    const message = fakeMessage({ members: { fetch: vi.fn(async () => { throw new Error('unknown member'); }) } });
-    const client = { users: { fetch: vi.fn(async () => { throw new Error('unknown user'); }) } };
-    await expect(svc.sendStealthDm(message, '789', 'x', client as any)).resolves.toBeUndefined();
+  it('id no numérico → no consulta el transporte', async () => {
+    await svc.sendStealthDm('no-soy-id', 'x', 'g1');
+    expect(transport.sendDm).not.toHaveBeenCalled();
   });
 
   it('scheduleDelayedDms sin dms → no programa nada', () => {
     const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
-    svc.scheduleDelayedDms(fakeMessage(null), [], {} as any);
+    svc.scheduleDelayedDms(null, []);
     expect(setTimeoutSpy).not.toHaveBeenCalled();
     setTimeoutSpy.mockRestore();
   });
 
   it('scheduleDelayedDms envía cada DM ~3s después (timers falsos)', async () => {
     vi.useFakeTimers();
-    const send = vi.fn(async () => {});
-    const message = fakeMessage({ members: { fetch: vi.fn(async () => ({ send })) } });
-    svc.scheduleDelayedDms(message, [{ targetUid: '1', msg: 'a' }, { targetUid: '2', msg: 'b' }], {} as any);
+    svc.scheduleDelayedDms('g1', [
+      { targetUid: '1', msg: 'a' },
+      { targetUid: '2', msg: 'b' },
+    ]);
     await vi.advanceTimersByTimeAsync(3100);
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(send).toHaveBeenNthCalledWith(1, 'a');
-    expect(send).toHaveBeenNthCalledWith(2, 'b');
+    expect(transport.sendDm).toHaveBeenCalledTimes(2);
+    expect(transport.sendDm).toHaveBeenNthCalledWith(1, '1', 'a', 'g1');
+    expect(transport.sendDm).toHaveBeenNthCalledWith(2, '2', 'b', 'g1');
   });
 });

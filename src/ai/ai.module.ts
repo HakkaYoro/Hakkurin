@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
-import { GeminiProvider } from './gemini.provider';
-import { ContextBuilderService } from './context-builder.service';
-import { ConfigModule } from '../common/config.module';
+import { GeminiProvider } from './infrastructure/adapters/gemini.provider';
+import { ContextBuilderService } from './application/context-builder.service';
+import { AiBrain } from './domain/ports/ai-brain.port';
 import { MemoryModule } from '../memory/memory.module';
 
 @Module({
-  imports: [ConfigModule, MemoryModule],
-  providers: [ContextBuilderService, { provide: 'AiBrain', useClass: GeminiProvider }],
-  exports: ['AiBrain'],
+  imports: [MemoryModule],
+  providers: [ContextBuilderService, { provide: AiBrain, useClass: GeminiProvider }],
+  exports: [AiBrain],
 })
 export class AiModule {}

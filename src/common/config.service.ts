@@ -2,11 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
-// Puerto de core/config_manager.py. Store JSON en data/config.json (gitignored),
-// escritura atómica (temp + rename) — arregla la deuda no-atómica de :35-37.
-// Las credenciales Navidrome (antes hardcoded en bot/navidrome_client.py:9-13)
-// viven aquí también. Singleton vía NestJS DI (ConfigModule @Global).
-
 export const CONFIG_FILE = 'data/config.json';
 
 export interface HakkurinConfig {
@@ -17,17 +12,13 @@ export interface HakkurinConfig {
   system_prompt: string;
   reply_probability: number;
   developer_id: string;
-  // Claves añadidas en el port (no en defaults originales de Python):
-  nanogpt_api_key?: string; // legacy, se ignora en el port Gemini-only — se mantiene solo para migrar el config existente
-  // Navidrome (antes hardcoded en navidrome_client.py:9-13):
+  nanogpt_api_key?: string; // legacy: se ignora; sólo se mantiene para no romper configs existentes
   navidrome_base_url?: string;
   navidrome_external_url?: string;
   navidrome_username?: string;
   navidrome_password?: string;
-  // WebUI:
   webui_token?: string;
   debug_dm?: boolean;
-  // Sidecar yt-dlp:
   ytdl_sidecar_url?: string;
   [key: string]: any;
 }
@@ -84,6 +75,13 @@ export class ConfigService {
 
   get<T = any>(key: string, defaultValue: T = undefined as any): T {
     return (this.config[key] as T) ?? defaultValue;
+  }
+
+  /** URL base del sidecar yt-dlp. Env manda sobre config: en compose lo fija
+   *  YTDL_SIDECAR_URL (docker-compose.yml) — un config vacío dejaba el default
+   *  localhost:7654, que dentro del contenedor del bot es ECONNREFUSED permanente. */
+  sidecarUrl(): string {
+    return process.env.YTDL_SIDECAR_URL || this.get<string>('ytdl_sidecar_url', 'http://localhost:7654');
   }
 
   getAll(): HakkurinConfig {

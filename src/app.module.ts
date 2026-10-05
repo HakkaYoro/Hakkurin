@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule } from './common/config.module';
 import { MemoryModule } from './memory/memory.module';
 import { AiModule } from './ai/ai.module';
@@ -11,6 +12,15 @@ import { WebModule } from './web/web.module';
 // DiscordService (ya inyecta music+client); ScheduleModule.forRoot() los activa.
 // No hace falta un SchedulerModule/SchedulerService aparte: serían puro delegado.
 @Module({
-  imports: [ScheduleModule.forRoot(), ConfigModule, MemoryModule, AiModule, ConversationModule, DiscordModule, WebModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
+    ConfigModule,
+    MemoryModule,
+    AiModule,
+    ConversationModule,
+    DiscordModule,
+    WebModule,
+  ],
 })
 export class AppModule {}

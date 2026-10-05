@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
-import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/gemini.provider';
+import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.provider';
 import { ConfigService } from '../src/common/config.service';
-import type { InteractionContext } from '../src/ai/ai-brain.interface';
+import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
 
 // Cobertura adicional del provider: prompts de resumen, generateResponse,
 // modo fallback persistente, two-pass de web_search y adjuntos de imagen.

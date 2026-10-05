@@ -4,7 +4,7 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "assets": [{ "include": "web/templates/**/*", "outDir": "dist" }],
+    "assets": [{ "include": "web/infrastructure/templates/**/*", "outDir": "dist" }],
     "watchAssets": true
   }
 }

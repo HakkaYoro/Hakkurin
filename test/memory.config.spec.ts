@@ -1,10 +1,12 @@
 import { promises as fsPromises } from 'fs';
 import * as path from 'path';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/crypto.service';
-import { MemoryService, BOT_SELF_ID } from '../src/memory/memory.service';
+import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
+import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
+import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { MemoryService, BOT_SELF_ID } from '../src/memory/application/memory.service';
 
-// Round-trip de cifrado AES-256-GCM (CryptoService).
 describe('CryptoService', () => {
   let c: CryptoService;
   beforeEach(async () => {
@@ -26,7 +28,6 @@ describe('CryptoService', () => {
   });
 });
 
-// ConfigService: defaults + escritura atómica persistente.
 describe('ConfigService', () => {
   it('escribe defaults si no existe y sobrevive a recarga', async () => {
     const a = new ConfigService();
@@ -40,13 +41,16 @@ describe('ConfigService', () => {
   });
 });
 
-// MemoryService: puerto de memory_manager.py.
 describe('MemoryService', () => {
   let mem: MemoryService;
+  let cryptoSvc: CryptoService;
+  let repo: MemoryRepository;
   beforeEach(async () => {
-    mem = new MemoryService(new CryptoService());
-    await (mem as any).crypto.onModuleInit();
-    await (mem as any).onModuleInit();
+    cryptoSvc = new CryptoService();
+    repo = new MemoryRepository(cryptoSvc);
+    mem = new MemoryService(cryptoSvc, repo, new MemoryQueue(), new EventEmitter2());
+    await cryptoSvc.onModuleInit();
+    await mem.onModuleInit();
   });
 
   it('devuelve memoria vacía para usuario nuevo', async () => {
@@ -57,9 +61,8 @@ describe('MemoryService', () => {
   });
 
   it('addInteraction persiste y devuelve shouldSummarize al pasar el umbral de cuenta', async () => {
-    // Fija last_summary_time al ahora para aislar el umbral de CUENTA (20).
-    // (fiel a Python: con last_summary_time=0, la primera interacción ya trigger
-    //  por timeSinceLast enorme — ese camino se prueba en self-memory abajo.)
+    // Fija last_summary_time al ahora para aislar el umbral de CUENTA (20);
+    // con last_summary_time=0 la primera interacción ya dispararía por tiempo.
     await mem.saveMemory('1', { notes: '', last_summary_time: Date.now() / 1000 } as any);
     for (let i = 0; i < 19; i++) await expect(mem.addInteraction('1', `msg ${i}`)).resolves.toBe(false);
     await expect(mem.addInteraction('1', 'msg 20')).resolves.toBe(true);
@@ -68,13 +71,12 @@ describe('MemoryService', () => {
   });
 
   it('normaliza esquemas legacy/corruptos', async () => {
-    const cryptoSvc = (mem as any).crypto;
     const bad = {
       profile: { personality_traits: 'no es lista', likes: [1, 2, null, 'x'] },
       interaction_count: 'cinco',
       last_channel_id: '123abc',
     };
-    await (mem as any).atomicWriteBytes((mem as any).filePath('2'), cryptoSvc.encrypt(JSON.stringify(bad)));
+    await (repo as any).atomicWriteBytes((repo as any).filePath('2'), cryptoSvc.encrypt(JSON.stringify(bad)));
     const m = await mem.getMemory('2');
     expect(m.profile.personality_traits).toEqual([]);
     expect(m.profile.likes).toEqual(['1', '2', 'x']);
@@ -178,9 +180,9 @@ describe('MemoryService', () => {
     await mem.saveMemory('b', {} as any);
     // mtimes deterministas: b más reciente que a
     const base = new Date('2026-01-01T00:00:00Z');
-    await fsPromises.utimes((mem as any).filePath('a'), base, base);
+    await fsPromises.utimes((repo as any).filePath('a'), base, base);
     const later = new Date('2026-01-02T00:00:00Z');
-    await fsPromises.utimes((mem as any).filePath('b'), later, later);
+    await fsPromises.utimes((repo as any).filePath('b'), later, later);
     const list = await mem.listMemories();
     const ids = list.map((l) => l.user_id);
     expect(ids.indexOf('b')).toBeLessThan(ids.indexOf('a'));
@@ -192,7 +194,7 @@ describe('MemoryService', () => {
   });
 
   it('getMemory con archivo corrupto: lo borra (.enc + .txt) y devuelve memoria vacía', async () => {
-    const encPath = (mem as any).filePath('10');
+    const encPath = (repo as any).filePath('10');
     await fsPromises.mkdir('data/memory/summaries', { recursive: true });
     await fsPromises.writeFile(encPath, Buffer.from('no-es-cifrado'));
     await fsPromises.writeFile('data/memory/summaries/10.txt', 'viejo');
@@ -200,6 +202,12 @@ describe('MemoryService', () => {
     expect(m.interaction_count).toBe(0); // vacía
     await expect(fsPromises.access(encPath)).rejects.toThrow(); // .enc eliminado
     await expect(fsPromises.access('data/memory/summaries/10.txt')).rejects.toThrow();
+  });
+
+  it('mutex: encolados concurrentes no pierden items', async () => {
+    const texts = Array.from({ length: 20 }, (_, i) => `msg ${i}`);
+    await Promise.all(texts.map((t) => mem.addToQueue('mx', t)));
+    expect(await mem.getQueuedInteractions('mx')).toEqual(texts);
   });
 
   it('addToQueue ignora null/vacío; getQueuedInteractions filtra por usuario', async () => {
@@ -217,12 +225,12 @@ describe('MemoryService', () => {
     await mem.saveMemory('13', { summary: 'con espejo' } as any);
     await mem.saveMemory('14', {} as any);
     await mem.deleteMemory('13');
-    await expect(fsPromises.access((mem as any).filePath('13'))).rejects.toThrow();
+    await expect(fsPromises.access((repo as any).filePath('13'))).rejects.toThrow();
     await expect(fsPromises.access('data/memory/summaries/13.txt')).rejects.toThrow();
     expect((await mem.getMemory('13')).summary).toBe('');
 
     await mem.deleteAllMemories();
-    await expect(fsPromises.access((mem as any).filePath('14'))).rejects.toThrow();
+    await expect(fsPromises.access((repo as any).filePath('14'))).rejects.toThrow();
     expect((await mem.listMemories()).length).toBe(0);
   });
 });

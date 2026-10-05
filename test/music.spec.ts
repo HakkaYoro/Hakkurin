@@ -1,69 +1,32 @@
 import { vi } from 'vitest';
-
-// Fakes de comportamiento de la capa de voz (@discordjs/voice): player y conexión
-// falsos que graban llamadas. El resto del módulo se usa real. ffmpeg se spawnea
-// de verdad con URLs que rechazan al instante (127.0.0.1:9) — no hay audio real.
-const h = vi.hoisted(() => {
-  const conns = new Map<string, any>();
-  let lastPlayer: any = null;
-  function makeFakePlayer() {
-    const listeners = new Map<string, any[]>();
-    const player: any = {
-      state: { status: 'idle' },
-      play: vi.fn(),
-      stop: vi.fn(),
-      on: (ev: string, fn: any) => {
-        if (!listeners.has(ev)) listeners.set(ev, []);
-        listeners.get(ev)!.push(fn);
-      },
-      _emit: (ev: string) => (listeners.get(ev) ?? []).forEach((f) => f()),
-    };
-    lastPlayer = player;
-    return player;
-  }
-  function makeFakeConnection(guildId: string) {
-    return {
-      guildId,
-      joinConfig: { channelId: 'vc1' },
-      state: { status: 'ready' },
-      subscribe: vi.fn(),
-      destroy: vi.fn(),
-      on: vi.fn(),
-    };
-  }
-  return {
-    conns,
-    lastPlayer: () => lastPlayer,
-    makeFakePlayer,
-    makeFakeConnection,
-    getVoiceConnection: (gid: string) => conns.get(gid) ?? null,
-    joinVoiceChannel: (opts: any) => {
-      const c = makeFakeConnection(opts.guildId);
-      conns.set(opts.guildId, c);
-      return c;
-    },
-    entersState: async (conn: any) => conn,
-  };
-});
-
-vi.mock('@discordjs/voice', async (importOriginal) => {
-  const actual: any = await importOriginal();
-  return {
-    ...actual,
-    getVoiceConnection: h.getVoiceConnection,
-    joinVoiceChannel: h.joinVoiceChannel,
-    entersState: h.entersState,
-    createAudioPlayer: () => h.makeFakePlayer(),
-    createAudioResource: () => ({ metadata: null }),
-  };
-});
-
 import { ChannelType } from 'discord.js';
-import { MusicService, type QueueItem } from '../src/music/music.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { MusicService } from '../src/music/application/music.service';
+import { QueueItemVo } from '../src/music/domain/music.domain';
+import { SidecarClient } from '../src/music/infrastructure/adapters/sidecar.client';
+import { FfmpegAdapter } from '../src/music/infrastructure/adapters/ffmpeg.adapter';
+import { DiscordPresenter } from '../src/music/infrastructure/adapters/music.presenter';
 import { ConfigService } from '../src/common/config.service';
 
+// Fakes: VoiceConnectionPort y CatalogPort. El StreamSource real (SidecarClient)
+// corre contra fetch stubbed y el AudioPipeline real (FfmpegAdapter) contra
+// child_process mockeado — determinista y sin audio ni red real.
+vi.mock('child_process', async () => {
+  const { EventEmitter } = await import('events');
+  const { PassThrough } = await import('stream');
+  const { vi: v } = await import('vitest');
+  return {
+    spawn: v.fn(() => {
+      const proc: any = new EventEmitter();
+      proc.stdout = new PassThrough();
+      proc.stderr = new PassThrough();
+      proc.kill = v.fn();
+      return proc;
+    }),
+  };
+});
+
 // Player, cola, votos de skip, radio y limpieza de VC con voz simulada.
-// (Los tests de mapeo puro vivían aquí: siguen abajo, sin la capa de voz.)
 
 class MockConfig extends ConfigService {
   store: Record<string, any> = { ytdl_sidecar_url: 'http://sidecar.test:7654' };
@@ -74,7 +37,7 @@ class MockConfig extends ConfigService {
   }
 }
 
-function makeNavidrome(over: Record<string, any> = {}) {
+function makeCatalog(over: Record<string, any> = {}) {
   return {
     getStreamUrl: vi.fn((id: string) => `http://navi.local/stream/${id}`),
     getCoverUrl: vi.fn((cid?: string) => (cid ? `http://navi.local/cover/${cid}` : null)),
@@ -86,12 +49,45 @@ function makeNavidrome(over: Record<string, any> = {}) {
   } as any;
 }
 
-function makeService(nav = makeNavidrome()) {
-  const svc = new MusicService(new MockConfig(), nav);
+function makeFakeVoice(over: Record<string, any> = {}) {
+  const conns = new Map<string, any>();
+  const players: any[] = [];
+  const lost: Record<string, ((why: string) => void) | undefined> = {};
+  const voice: any = {
+    ensureConnection: vi.fn(async (gid: string, _vc: any, onLost?: (why: string) => void) => {
+      const conn = { guildId: gid, subscribe: vi.fn(), destroy: vi.fn(), on: vi.fn() };
+      conns.set(gid, conn);
+      lost[gid] = onLost;
+      return conn;
+    }),
+    createPlayer: vi.fn((_gid: string, _onIdle: () => void) => {
+      const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+      players.push(player);
+      return player;
+    }),
+    isConnected: vi.fn((gid: string) => conns.has(gid)),
+    activeChannelId: vi.fn((gid: string) => (conns.has(gid) ? (over.activeChannelId ?? 'vc1') : null)),
+    destroyConnection: vi.fn((gid: string, _why: string) => {
+      const c = conns.get(gid);
+      c?.destroy?.();
+      conns.delete(gid);
+    }),
+    humansInVoice: vi.fn(async (_gid: string, _cid: string) => over.humans ?? []),
+    setClient: vi.fn(),
+  };
+  return { voice, conns, players, lost };
+}
+
+function makeService(catalog = makeCatalog(), voiceOver: Record<string, any> = {}) {
+  const config = new MockConfig();
+  const { voice, conns, players, lost } = makeFakeVoice(voiceOver);
+  const svc = new MusicService(config, catalog, new SidecarClient(config), new FfmpegAdapter(), new DiscordPresenter(), voice, new EventEmitter2());
   const channel: any = { id: 'c1', type: ChannelType.GuildText, send: vi.fn(async () => {}) };
   const guild: any = { id: 'g1' };
-  return { svc, nav, channel, guild };
+  return { svc, catalog, voice, conns, players, lost, channel, guild };
 }
+
+const q = (raw: any): QueueItemVo => QueueItemVo.from(raw)!;
 
 function makeInteraction(over: Record<string, any> = {}) {
   const i: any = {
@@ -114,7 +110,7 @@ function makeInteraction(over: Record<string, any> = {}) {
 }
 
 describe('MusicService — mapeo puro (sin voz)', () => {
-  it('songToItem mapea una canción Navidrome a QueueItem con stream/cover', () => {
+  it('songToItem mapea una canción Navidrome a QueueItemVo con stream/cover', () => {
     const { svc } = makeService();
     const item = svc.songToItem({ id: 's1', title: 'Canción', artist: 'Art', album: 'Disco', coverArt: 'c1' } as any);
     expect(item).toEqual({
@@ -150,16 +146,16 @@ describe('MusicService — reproducción (voz fake)', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    h.conns.clear();
   });
 
   it('playNext navidrome: consume cola, crea player, pre-buffer 5s y envía embed con cover', async () => {
     const { svc, channel, guild } = makeService();
-    const item: QueueItem = {
-      type: 'navidrome', url: 'http://127.0.0.1:9/audio', title: 'Song', artist: 'Artist', album: 'Album', cover_url: 'http://cover',
-    };
+    const item = q({
+      type: 'navidrome', id: 'n9', url: 'http://127.0.0.1:9/audio', title: 'Song', artist: 'Artist', album: 'Album', cover_url: 'http://cover',
+    });
     await svc.enqueueAndPlay(guild, channel, [item]);
-    const playerMid = h.lastPlayer();
+    const playerMid = (svc as any).state('g1').player;
+    expect(playerMid).toBeTruthy();
     expect(playerMid.play).not.toHaveBeenCalled(); // aún en pre-buffer
 
     await vi.advanceTimersByTimeAsync(6000);
@@ -178,7 +174,7 @@ describe('MusicService — reproducción (voz fake)', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/abc' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/abc' })]);
     await vi.advanceTimersByTimeAsync(6000);
     expect(fetchMock.mock.calls[0][0]).toContain('http://sidecar.test:7654/extract?url=');
     expect(svc.getNowPlaying('g1')).toBe('YT Title');
@@ -189,7 +185,7 @@ describe('MusicService — reproducción (voz fake)', () => {
   it('sidecar falla → mensaje de error al canal, cola queda vacía y sin canción colgada', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502, text: async () => 'blocked' })));
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
     await vi.advanceTimersByTimeAsync(2000);
     const texts = channel.send.mock.calls.map((c: any[]) => c[0]);
     expect(texts.some((t: any) => String(t).includes('Ocurrió un error al reproducir'))).toBe(true);
@@ -197,45 +193,38 @@ describe('MusicService — reproducción (voz fake)', () => {
   });
 
   it('radio: cola vacía + modo radio → repone desde Navidrome (similar → random)', async () => {
-    const { svc, nav, channel, guild } = makeService();
+    const { svc, catalog, channel, guild } = makeService();
     svc.startRadioMode('g1');
     await svc.enqueueAndPlay(guild, channel, []); // playNext con radio y cola vacía
     await vi.advanceTimersByTimeAsync(6000);
-    expect(nav.getSimilarSongs).toHaveBeenCalled();
-    expect(nav.getRandomSongs).toHaveBeenCalled();
+    expect(catalog.getSimilarSongs).toHaveBeenCalled();
+    expect(catalog.getRandomSongs).toHaveBeenCalled();
     expect(svc.getNowPlaying('g1')).toBe('Rartist - Random Song | Álbum: Ralbum');
     const radioMsg = channel.send.mock.calls.map((c: any[]) => c[0]).find((a: any) => String(a).includes('Radio'));
     expect(radioMsg).toContain('Añadidas 1 canciones en la cola');
   });
 
   it('skip: voto aislado, voto repetido rechazado y mayoría → stop', async () => {
-    const { svc } = makeService();
+    const { svc, voice } = makeService(undefined, { humans: [{ id: 'h1' }, { id: 'h2' }] });
+    await voice.ensureConnection('g1', { id: 'vc1', guild: {} }); // el canal del bot viene del puerto
     const s = (svc as any).state('g1');
     const player = { state: { status: 'playing' }, stop: vi.fn() };
     s.player = player;
 
-    const guild = {
-      id: 'g1',
-      members: { me: { voice: { channelId: 'vc1' } } },
-      channels: {
-        cache: new Map([
-          ['vc1', { members: new Map([['h1', { user: { bot: false } }], ['h2', { user: { bot: false } }], ['bot', { user: { bot: true } }]]) }],
-        ]),
-      },
-    };
     // 2 humanos → mayoría = 2 votos.
-    const i1 = makeInteraction({ guild, member: { voice: { channelId: 'vc1' } }, user: { id: 'v1' } });
+    const i1 = makeInteraction({ member: { voice: { channelId: 'vc1' } }, user: { id: 'v1' } });
     await svc.skip(i1);
+    expect(voice.humansInVoice).toHaveBeenCalledWith('g1', 'vc1');
     expect(i1.followUp).toHaveBeenCalledWith({ content: '🗳️ Voto registrado (1/2).', ephemeral: false });
     expect(player.stop).not.toHaveBeenCalled();
 
     // Voto repetido → rechazado.
-    const iRepeat = makeInteraction({ guild, member: { voice: { channelId: 'vc1' } }, user: { id: 'v1' } });
+    const iRepeat = makeInteraction({ member: { voice: { channelId: 'vc1' } }, user: { id: 'v1' } });
     await svc.skip(iRepeat);
     expect(iRepeat.followUp).toHaveBeenCalledWith({ content: '¡Ya has votado para saltar!', ephemeral: true });
 
     // Voto 2 → mayoría alcanzada → stop.
-    const i2 = makeInteraction({ guild, member: { voice: { channelId: 'vc1' } }, user: { id: 'v2' } });
+    const i2 = makeInteraction({ member: { voice: { channelId: 'vc1' } }, user: { id: 'v2' } });
     await svc.skip(i2);
     expect(player.stop).toHaveBeenCalledTimes(1);
     expect(i2.followUp).toHaveBeenCalledWith({ content: '⏭️ ¡Votación completada! Saltando canción.', ephemeral: false });
@@ -250,8 +239,7 @@ describe('MusicService — reproducción (voz fake)', () => {
 
     const s = (svc as any).state('g1');
     s.player = { state: { status: 'playing' }, stop: vi.fn() };
-    const guild = { id: 'g1', members: { me: { voice: { channelId: 'vc1' } } }, channels: { cache: new Map() } };
-    const i = makeInteraction({ guild, member: { voice: { channelId: 'otro-canal' } } });
+    const i = makeInteraction({ member: { voice: { channelId: 'otro-canal' } } });
     await svc.skip(i);
     expect(i.followUp).toHaveBeenCalledWith({ content: 'Debes estar en el mismo canal de voz para saltar.', ephemeral: true });
   });
@@ -265,14 +253,14 @@ describe('MusicService — reproducción (voz fake)', () => {
 
     // Con conexión + estado sucio
     const b = makeService();
-    const conn = h.makeFakeConnection('g1');
-    h.conns.set('g1', conn);
+    await b.voice.ensureConnection('g1', { id: 'vc1', guild: {} });
+    const conn = b.conns.get('g1');
     const s = (b.svc as any).state('g1');
     const player = { state: { status: 'playing' }, stop: vi.fn() };
     const ffmpeg = { kill: vi.fn() };
     s.player = player;
     s.ffmpeg = ffmpeg;
-    s.queue.push({ type: 'youtube', url: 'x' });
+    s.enqueue(q({ type: 'youtube', url: 'x' }));
     s.currentSong = 'Vieja';
 
     await b.svc.stop(makeInteraction());
@@ -294,7 +282,7 @@ describe('MusicService — reproducción (voz fake)', () => {
     s.currentSong = 'A - Actual';
     s.currentAlbum = 'Disco';
     s.currentCoverUrl = 'http://cover';
-    for (let i = 0; i < 12; i++) s.queue.push({ type: 'youtube', url: `u${i}`, title: `Tema ${i}` });
+    for (let i = 0; i < 12; i++) s.enqueue(q({ type: 'youtube', url: `u${i}`, title: `Tema ${i}` }));
     const i = makeInteraction();
     await svc.queueInfo(i);
     const arg = i.reply.mock.calls[0][0];
@@ -309,32 +297,26 @@ describe('MusicService — reproducción (voz fake)', () => {
   });
 
   it('checkEmptyVoiceChannels: desconecta tras la gracia de 5min con VC vacío', async () => {
-    const { svc } = makeService();
-    const conn = h.makeFakeConnection('g1');
-    h.conns.set('g1', conn);
+    const { svc, voice, conns } = makeService();
+    await voice.ensureConnection('g1', { id: 'vc1', guild: {} });
+    const conn = conns.get('g1');
     const s = (svc as any).state('g1');
     s.player = { state: { status: 'playing' }, stop: vi.fn() };
     s.emptySince = Date.now() - 6 * 60 * 1000; // gracia vencida
-    const client = {
-      guilds: { cache: new Map([['g1', { id: 'g1', members: { me: { voice: { channelId: 'vc1' } } } }]]) },
-      channels: { cache: new Map([['vc1', { members: new Map() }]]) },
-    };
+    const client = { isReady: () => true };
     await svc.checkEmptyVoiceChannels(client);
+    expect(voice.setClient).toHaveBeenCalledWith(client);
     expect(conn.destroy).toHaveBeenCalled();
     expect(s.player).toBeNull(); // resetPlaybackState
   });
 
   it('checkEmptyVoiceChannels: con humanos dentro no desconecta y resetea el timer', async () => {
-    const { svc } = makeService();
-    const conn = h.makeFakeConnection('g1');
-    h.conns.set('g1', conn);
+    const { svc, voice, conns } = makeService(undefined, { humans: [{ id: 'h1' }] });
+    await voice.ensureConnection('g1', { id: 'vc1', guild: {} });
+    const conn = conns.get('g1');
     const s = (svc as any).state('g1');
     s.emptySince = Date.now() - 6 * 60 * 1000;
-    const client = {
-      guilds: { cache: new Map([['g1', { members: { me: { voice: { channelId: 'vc1' } } } }]]) },
-      channels: { cache: new Map([['vc1', { members: new Map([['h1', { user: { bot: false } }]]) }]]) },
-    };
-    await svc.checkEmptyVoiceChannels(client);
+    await svc.checkEmptyVoiceChannels({ isReady: () => true });
     expect(conn.destroy).not.toHaveBeenCalled();
     expect(s.emptySince).toBeNull();
   });
@@ -353,14 +335,14 @@ describe('MusicService — reproducción (voz fake)', () => {
       member: { voice: { channelId: 'vc1', channel: vcRef } },
     });
     const p = svc.play(interaction, 'https://youtu.be/abc');
-    await vi.advanceTimersByTimeAsync(1500); // joinVC + estabilización 1s
+    await vi.advanceTimersByTimeAsync(1500);
     await p;
     expect(interaction.followUp).toHaveBeenCalledWith({ content: '▶️ Iniciando reproducción...', ephemeral: false });
     await vi.advanceTimersByTimeAsync(6000); // prebuffer del track
-    expect(h.lastPlayer().play).toHaveBeenCalled();
+    expect((svc as any).state('g1').player.play).toHaveBeenCalled();
 
     // Segundo /play con player ocupado → solo encola.
-    (h.lastPlayer() as any).state.status = 'playing';
+    (svc as any).state('g1').player.state.status = 'playing';
     const i2 = makeInteraction({
       deferred: true,
       guild,
@@ -381,13 +363,34 @@ describe('MusicService — reproducción (voz fake)', () => {
     });
     expect((svc as any).state('g1').queue).toEqual([]);
   });
+
+  it('conexión perdida irrecuperable (onLost) → kill ffmpeg + descarta player', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }),
+    })));
+    const { svc, voice, conns, players, lost, channel, guild } = makeService();
+    // El cableado real lo hace joinVoice; aquí registramos su handler a mano.
+    await voice.ensureConnection('g1', { id: 'vc1', guild: {} }, (why: string) => (svc as any).onVoiceLost('g1', why));
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
+    await vi.advanceTimersByTimeAsync(1000);
+    const s = (svc as any).state('g1');
+    const player = s.player;
+    const ffmpeg = s.ffmpeg;
+    expect(ffmpeg).toBeTruthy();
+
+    // El adapter notifica la pérdida (EndpointRemoved / reconexión falló).
+    lost['g1']?.('desconexión irrecuperable');
+    expect(conns.get('g1')?.destroy).not.toHaveBeenCalled(); // la destruye el adapter, no el callback
+    expect(ffmpeg.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(s.ffmpeg).toBeNull();
+    expect(player.stop).toHaveBeenCalled();
+    expect(s.player).toBeNull();
+    expect(players).toHaveLength(1); // player nuevo sólo al reproducir de nuevo (re-bind)
+  });
 });
 
 describe('MusicService — isIdle (para el auto-update del sidecar)', () => {
-  afterEach(() => {
-    h.conns.clear();
-  });
-
   it('sin guilds ni actividad → idle', () => {
     const { svc } = makeService();
     expect(svc.isIdle()).toBe(true);
@@ -414,7 +417,6 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    h.conns.clear();
   });
 
   it('/stop durante el extract → playNext aborta: sin player nuevo, sin ffmpeg, epoch++', async () => {
@@ -426,7 +428,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     });
     vi.stubGlobal('fetch', fetchMock);
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
     const s = (svc as any).state('g1');
     expect(s.isFetching).toBe(true);
     const epochBefore = s.epoch;
@@ -453,9 +455,9 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
       json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }),
     })));
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'navidrome', url: 'http://127.0.0.1:9/a', title: 'Song', artist: 'A', album: 'Al' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'navidrome', id: 'n1', url: 'http://127.0.0.1:9/a', title: 'Song', artist: 'A', album: 'Al' })]);
     await vi.advanceTimersByTimeAsync(2000); // dentro del pre-buffer de 5s
-    const player = h.lastPlayer();
+    const player = (svc as any).state('g1').player;
     const s = (svc as any).state('g1');
 
     await svc.stop(makeInteraction({}));
@@ -478,7 +480,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     });
     vi.stubGlobal('fetch', fetchMock);
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
     await vi.advanceTimersByTimeAsync(3500 + 6000); // retry 3s + prebuffer
     const extracts = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract'));
     expect(extracts).toHaveLength(2);
@@ -498,7 +500,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     });
     vi.stubGlobal('fetch', fetchMock);
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
     await vi.advanceTimersByTimeAsync(15000 + 6000); // retries 3s + 12s + prebuffer
     const extracts = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract'));
     expect(extracts).toHaveLength(3);
@@ -515,7 +517,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
       return gate;
     }));
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/vieja' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/vieja' })]);
     await svc.stop(makeInteraction({}));
     await vi.advanceTimersByTimeAsync(2000);
     const s = (svc as any).state('g1');
@@ -523,7 +525,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     expect(channel.send).not.toHaveBeenCalled(); // la sesión abortada es silenciosa (abort, no error)
 
     // Un /play después del stop: sesión nueva (epoch distinto) reproduce normal.
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/nueva' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/nueva' })]);
     expect(s.isFetching).toBe(true); // la sesión nueva gestiona su flag
     releaseFetch({ ok: true, json: async () => ({ stream_url: 'http://127.0.0.1:9/n', title: 'Nueva' }) });
     await vi.advanceTimersByTimeAsync(6000);
@@ -536,7 +538,6 @@ describe('SidecarClient — precedencia de URL (env > config > default)', () => 
   afterEach(() => {
     delete process.env.YTDL_SIDECAR_URL;
     vi.unstubAllGlobals();
-    h.conns.clear();
   });
 
   it('env YTDL_SIDECAR_URL manda sobre ytdl_sidecar_url del config (compose)', async () => {
@@ -547,7 +548,56 @@ describe('SidecarClient — precedencia de URL (env > config > default)', () => 
     }));
     vi.stubGlobal('fetch', fetchMock);
     const { svc, channel, guild } = makeService();
-    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await svc.enqueueAndPlay(guild, channel, [q({ type: 'youtube', url: 'https://youtu.be/x' })]);
     expect(String(fetchMock.mock.calls[0][0])).toContain('http://sidecar:7654/extract');
+  });
+});
+
+describe('FfmpegAdapter — contrato createAndPlay/killCurrent (spawn fake)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('killCurrent durante el pre-buffer → devuelve false y nunca hace play', async () => {
+    const adapter = new FfmpegAdapter();
+    const s: any = { ffmpeg: null };
+    const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+
+    const p = adapter.createAndPlay(s, 'http://127.0.0.1:9/x', player);
+    const ff = s.ffmpeg;
+    expect(ff).toBeTruthy(); // spawn (fake) registrado en el estado
+    await vi.advanceTimersByTimeAsync(2000);
+    adapter.killCurrent(s); // simula /stop durante el pre-buffer
+    expect(ff.kill).toHaveBeenCalledWith('SIGKILL');
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(await p).toBe(false);
+    expect(player.play).not.toHaveBeenCalled();
+    expect(s.ffmpeg).toBeNull();
+  });
+
+  it('sin abort: tras el pre-buffer hace play y killCurrent mata el proceso', async () => {
+    const adapter = new FfmpegAdapter();
+    const s: any = { ffmpeg: null };
+    const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+    const p = adapter.createAndPlay(s, 'http://127.0.0.1:9/x', player);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(await p).toBe(true);
+    expect(player.play).toHaveBeenCalledTimes(1);
+    const ff = s.ffmpeg;
+    adapter.killCurrent(s);
+    expect(ff.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(s.ffmpeg).toBeNull();
+  });
+
+  it('streamUrl vacío → false sin spawn ni play', async () => {
+    const adapter = new FfmpegAdapter();
+    const s: any = { ffmpeg: null };
+    const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+    expect(await adapter.createAndPlay(s, '', player)).toBe(false);
+    expect(s.ffmpeg).toBeNull();
+    expect(player.play).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,8 @@
-import { ActionParserService } from '../src/scheduler/action-parser.service';
+import { ActionParserService } from '../src/scheduler/application/action-parser.service';
 
-// Puerto de core/scheduler.py: parsea un array JSON (fenced o balanceado suelto)
-// dentro del texto libre de la auto-memoria, filtra la ventana "due" de 10min y
-// reescribe el bloque sin las ejecutadas. Cubrimos esos caminos + dedupe.
+// Parsea un array JSON (fenced o balanceado suelto) dentro del texto libre de la
+// auto-memoria, filtra la ventana "due" de 10min y reescribe el bloque sin las
+// ejecutadas. Cubrimos esos caminos + dedupe.
 
 function fmtLocal(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');

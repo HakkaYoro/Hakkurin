@@ -1,7 +1,8 @@
 import { vi } from 'vitest';
-import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/gemini.provider';
+import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.provider';
+import { parseAnalysisJson, errorAnalysisResult } from '../src/ai/infrastructure/mappers/gemini.mapper';
 import { ConfigService } from '../src/common/config.service';
-import type { InteractionContext } from '../src/ai/ai-brain.interface';
+import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
 
 // Verificación conductual del contrato AiBrain con un client @google/genai mockeado.
 // Complementa el review estático. No toca la red.
@@ -131,5 +132,41 @@ describe('GeminiProvider (contracto AiBrain)', () => {
     // Antes testApiConnection devolvía true igual → recoveryProbe creía la API sana.
     const p = makeProvider(vi.fn().mockRejectedValue(new Error('500 internal')));
     await expect(p.testApiConnection()).resolves.toBe(false);
+  });
+});
+
+describe('parseAnalysisJson (mapper anti-corrupción)', () => {
+  it('JSON válido → AnalysisResult tipado con todos los campos', () => {
+    const res = parseAnalysisJson(
+      '{"intent":"reply","response_content":["hola"],"is_talking_to_me":true,"reply_to_message_id":"55","ping_users":["9"],"thought_process":"t"}',
+    );
+    expect(res.intent).toBe('reply');
+    expect(res.response_content).toEqual(['hola']);
+    expect(res.is_talking_to_me).toBe(true);
+    expect(res.reply_to_message_id).toBe('55');
+    expect(res.ping_users).toEqual(['9']);
+    expect(res.thought_process).toBe('t');
+  });
+
+  it('response_content string y intent raro → normaliza a string[] e intent "ignore"', () => {
+    const res = parseAnalysisJson('{"intent":"hablar","response_content":"una sola","is_talking_to_me":"false"}');
+    expect(res.intent).toBe('ignore');
+    expect(res.response_content).toEqual(['una sola']);
+    expect(res.is_talking_to_me).toBe(false);
+  });
+
+  it('garbage sin JSON → errorAnalysisResult canónico', () => {
+    const res = parseAnalysisJson('lo siento, no tengo nada que ver con eso');
+    expect(res).toEqual(errorAnalysisResult('salida ilegible del modelo'));
+    expect(res.intent).toBe('error');
+    expect(res.response_content[0]).toContain('Error crítico de IA');
+  });
+
+  it('fences con texto alrededor → extrae el objeto balanceado', () => {
+    const res = parseAnalysisJson(
+      'Claro! ```json\n{"intent":"reply","response_content":["ok"],"is_talking_to_me":true}\n``` espero sirva',
+    );
+    expect(res.intent).toBe('reply');
+    expect(res.response_content).toEqual(['ok']);
   });
 });

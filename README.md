@@ -13,9 +13,9 @@ el original queda en la rama `legacy-python`.
 
 - **Cerebro Gemma 4** — `gemma-4-31b-it` y `gemma-4-26b-a4b-it` alternados por request
   para repartir cuota; ante 429 el ladder prueba el otro Gemma y después Gemini flash
-  como respaldo (40 min de modo fallback). Contexto capado a ~16k tokens, parseo
-  defensivo de JSON tras fences (Gemma no soporta JSON mode) y búsqueda web two-pass
-  en los modelos de respaldo.
+  como respaldo (40 min de modo fallback). Contexto capado a ~16k tokens, salida del
+  LLM validada con **zod** (extracción de JSON tras fences — Gemma no soporta JSON
+  mode) y búsqueda web two-pass en los modelos de respaldo.
 - **Memoria cifrada AES-256-GCM** por usuario + auto-memoria del bot, resúmenes
   automáticos y recordatorios programados.
 - **Pipeline probabilístico** — mención, reply, actividad reciente o probabilidad
@@ -29,12 +29,17 @@ el original queda en la rama `legacy-python`.
   protegida por el mismo AuthGuard HTTP Basic opt-in).
 - **Loops de fondo** — timeouts de sesión, cola de memoria, recovery de API,
   festividades, recordatorios y limpieza de canales de voz, con guard de reentrada.
+- **Arquitectura hexagonal + DDD** — cada feature se parte en `domain/` (entidades,
+  value objects, eventos y puertos como abstract classes), `application/` (use-cases
+  sin frameworks) e `infrastructure/` (adaptadores de Discord, voz, ffmpeg, sidecar y
+  disco); los eventos de dominio viajan por `@nestjs/event-emitter` y se publican solo
+  tras persistir.
 
 ## Stack
 
-NestJS 11 · discord.js 14 · @discordjs/voice · @google/genai · nunjucks · vitest ·
-AES-256-GCM vía `node:crypto`. Dos imágenes en GHCR: `bot` (~450 MB, ffmpeg estático)
-y `sidecar` (~210 MB, python:3.11-slim + yt-dlp).
+NestJS 11 · discord.js 14 · @discordjs/voice · @google/genai · @nestjs/event-emitter ·
+zod · nunjucks · vitest · AES-256-GCM vía `node:crypto`. Dos imágenes en GHCR: `bot`
+(~450 MB, ffmpeg estático) y `sidecar` (~210 MB, python:3.11-slim + yt-dlp).
 
 ## Despliegue (NAS / servidor)
 
@@ -83,27 +88,39 @@ privados por defecto — hazlo público o autentica el NAS.
 
 ```bash
 npm install
-npm test            # vitest
+npm test            # vitest (217 specs)
+npx tsc --noEmit    # typecheck (no hay script lint)
+npm run build       # nest build → dist/ (templates vía nest-cli assets)
 npm run start:dev   # watch; requiere sidecar aparte para música YT (http://localhost:7654)
 ```
 
 Necesita `data/config.json` con `bot_token` y `gemini_keys`, y ffmpeg en el PATH.
 
-## Estructura
+## Estructura (hexagonal)
+
+Cada feature se organiza en `domain/` (TypeScript puro: agregados, value objects,
+eventos y **puertos** como abstract classes), `application/` (use-cases) e
+`infrastructure/` (adaptadores concretos). Los puertos se bindean en el `@Module` con
+`{ provide: Puerto, useExisting: Adaptador }`; los use-cases no importan discord.js ni
+`fs`.
 
 ```
 src/
-  ai/            GeminiProvider: ladder de modelos, rotación de keys, web search
-  common/        ConfigService (data/config.json, escritura atómica)
-  conversation/  historial de canales y sesiones de conversación
-  discord/       gateway, pipeline de mensajes, slash commands, loops de fondo
-  memory/        cifrado por usuario, resúmenes, self-memory
-  music/         split hexagonal: domain/ports + sidecar.client + ffmpeg.adapter + presenter + updater
-  navidrome/     cliente Subsonic
-  scheduler/     cron de festividades
-  web/           WebUI nunjucks, AuthGuard y LogTee (export de logs)
+  common/        ConfigService @Global (data/config.json atómico, sidecarUrl())
+  ai/            puerto AiBrain; provider Gemini (ladder, rotación de keys);
+                 mapper zod de la salida del LLM
+  memory/        agregado UserMemory, cifrado AES-256-GCM, cola con mutex,
+                 listener de eventos para la auto-memoria
+  conversation/  entidades Session/ChannelContext, historial de canales
+  discord/       MessageTransportPort; gateway + loops de fondo (DiscordService);
+                 use-cases puros (respuesta, recordatorios, festividades, DMs)
+  music/         GuildMusicState + QueueItemVo; puertos de voz/audio/stream;
+                 adaptadores @discordjs/voice, ffmpeg, sidecar yt-dlp, presenter
+  navidrome/     SongVo + cliente Subsonic (implementa CatalogPort)
+  scheduler/     parser de recordatorios embebidos en auto-memoria
+  web/           WebUI nunjucks, AuthGuard, LogTee (export de logs)
 sidecar/         FastAPI + yt-dlp: /extract, /version, /update, /reset
-test/            specs de vitest, un archivo por módulo
+test/            specs de vitest, un archivo por módulo (cwd tmp aislado)
 ```
 
 Referencias históricas: el código Python original vive en la rama `legacy-python`;

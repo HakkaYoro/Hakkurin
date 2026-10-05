@@ -1,4 +1,4 @@
-import { normalizeResponseContent } from '../src/discord/response-normalize';
+import { normalizeResponseContent } from '../src/ai/infrastructure/mappers/response-normalize';
 
 // Bug histórico: Gemma devolvía response_content como string o como lista cuyo
 // item era un literal de lista Python "['a','b']". El pipeline (discord_client.py:621-654)

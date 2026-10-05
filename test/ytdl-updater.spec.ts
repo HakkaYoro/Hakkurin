@@ -1,4 +1,4 @@
-import { YtdlUpdaterService } from '../src/music/ytdl-updater.service';
+import { YtdlUpdaterService } from '../src/music/infrastructure/ytdl-updater.service';
 import { ConfigService } from '../src/common/config.service';
 
 // Loop horario de auto-update de yt-dlp: solo actualiza con el bot idle y

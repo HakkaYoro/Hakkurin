@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { LogTeeService } from '../src/web/log-tee.service';
+import { LogTeeService } from '../src/web/infrastructure/log-tee.service';
 
 // Ring buffer del tee de logs: captura nivel/contexto y conserva las últimas
 // 2000 líneas. Se stubbea process.stdout para no ensuciar la salida del test

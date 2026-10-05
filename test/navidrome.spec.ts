@@ -1,12 +1,12 @@
 import { vi } from 'vitest';
-import { NavidromeService } from '../src/navidrome/navidrome.service';
+import { NavidromeService } from '../src/navidrome/infrastructure/navidrome.service';
+import { SongVo } from '../src/navidrome/domain/song.vo';
 import { ConfigService } from '../src/common/config.service';
 import { createHash } from 'crypto';
 
-// El bit security-crítico del puerto: auth MD5-salt de Subsonic
-// (navidrome_client.py:22-32) y el armado de URLs de stream/cover. Si el token o
-// la query se arman mal, Navidrome rechaza todo. Aquí validamos el algoritmo y el
-// unwrapping de respuestas sin tocar la red real.
+// Auth MD5-salt de Subsonic y armado de URLs de stream/cover: si el token o la
+// query se arman mal, Navidrome rechaza todo. Validamos el algoritmo, el
+// unwrapping de respuestas (→ SongVo) sin tocar la red real.
 
 class MockConfig extends ConfigService {
   store: Record<string, any> = {
@@ -28,6 +28,23 @@ function makeService(fetchImpl?: any): { svc: NavidromeService; restore: () => v
   const svc = new NavidromeService(new MockConfig());
   return { svc, restore: () => ((global as any).fetch = original) };
 }
+
+describe('SongVo — normalización defensiva del crudo Subsonic', () => {
+  it('sin id (o no-objeto) → null; campos no-string/ vacíos → null', () => {
+    expect(SongVo.from(null)).toBeNull();
+    expect(SongVo.from('canción')).toBeNull();
+    expect(SongVo.from({})).toBeNull();
+    expect(SongVo.from({ id: '' })).toBeNull();
+    expect(SongVo.from({ id: 42 })).toBeNull();
+
+    const s = SongVo.from({ id: 's1', title: 'T', artist: '', album: 9, coverArt: 'c', extra: 'x' })!;
+    expect(s.id).toBe('s1');
+    expect(s.title).toBe('T');
+    expect(s.artist).toBeNull();
+    expect(s.album).toBeNull();
+    expect(s.coverArt).toBe('c');
+  });
+});
 
 describe('NavidromeService — auth MD5-salt + URLs', () => {
   it('getStreamUrl arma /rest/stream con u, s (6), t=md5(password+salt)', () => {
@@ -69,15 +86,28 @@ describe('NavidromeService — auth MD5-salt + URLs', () => {
 });
 
 describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
-  it('search devuelve searchResult3 crudo', async () => {
+  it('search devuelve searchResult3 tipado (SongVo/álbumes/artistas)', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ 'subsonic-response': { searchResult3: { song: [{ id: 's1', title: 'T' }] } } }),
+      json: async () => ({
+        'subsonic-response': {
+          searchResult3: {
+            song: [{ id: 's1', title: 'T' }],
+            album: [{ id: 'al1', name: 'Disco', artist: 'Artista', coverArt: 'c' }],
+            artist: [{ id: 'ar1', name: 'Artista' }],
+          },
+        },
+      }),
     });
     const { svc, restore } = makeService(fetchImpl);
     const res = await svc.search('foo');
     restore();
-    expect(res.song).toEqual([{ id: 's1', title: 'T' }]);
+    expect(res.song).toHaveLength(1);
+    expect(res.song[0]?.id).toBe('s1');
+    expect(res.song[0]?.title).toBe('T');
+    expect(res.album[0]?.id).toBe('al1');
+    expect(res.album[0]?.name).toBe('Disco');
+    expect(res.artist[0]?.name).toBe('Artista');
     expect(fetchImpl.mock.calls[0][0]).toContain('/rest/search3?');
   });
 
@@ -116,18 +146,18 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
     expect(songs.map((s) => s.id)).toEqual(['x']);
   });
 
-  it('respuesta de error de red → null/[] sin lanzar', async () => {
+  it('respuesta de error de red → listas vacías sin lanzar', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
     const { svc, restore } = makeService(fetchImpl);
-    await expect(svc.search('x')).resolves.toEqual({});
+    await expect(svc.search('x')).resolves.toEqual({ song: [], album: [], artist: [] });
     await expect(svc.getRandomSongs(5)).resolves.toEqual([]);
     restore();
   });
 
-  it('HTTP != 2xx → api devuelve null (search → {})', async () => {
+  it('HTTP != 2xx → api devuelve null (search → vacío, álbum → [])', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500 });
     const { svc, restore } = makeService(fetchImpl);
-    await expect(svc.search('x')).resolves.toEqual({});
+    await expect(svc.search('x')).resolves.toEqual({ song: [], album: [], artist: [] });
     await expect(svc.getAlbumSongs('al')).resolves.toEqual([]);
     restore();
   });
@@ -183,8 +213,10 @@ describe('NavidromeService — radio por artista', () => {
       json: async () => ({ 'subsonic-response': { similarSongs2: { song: [{ id: 'sim1' }] } } }),
     });
     const sa = makeService(a);
-    await expect(sa.svc.getSimilarSongs(['base1'], 10)).resolves.toEqual([{ id: 'sim1' }]);
+    const similar = await sa.svc.getSimilarSongs(['base1'], 10);
     sa.restore();
+    expect(similar).toHaveLength(1);
+    expect(similar[0]?.id).toBe('sim1');
     expect(a.mock.calls[0][0]).toContain('/rest/getSimilarSongs2?');
 
     // Sin resultados → fallback a random
@@ -193,7 +225,9 @@ describe('NavidromeService — radio por artista', () => {
       json: async () => ({ 'subsonic-response': { similarSongs2: {}, randomSongs: { song: [{ id: 'rnd' }] } } }),
     });
     const sb = makeService(b);
-    await expect(sb.svc.getSimilarSongs(['base1'], 10)).resolves.toEqual([{ id: 'rnd' }]);
+    const fallback = await sb.svc.getSimilarSongs(['base1'], 10);
     sb.restore();
+    expect(fallback).toHaveLength(1);
+    expect(fallback[0]?.id).toBe('rnd');
   });
 });

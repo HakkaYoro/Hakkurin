@@ -1,9 +1,7 @@
 import { Module } from '@nestjs/common';
-import { NavidromeService } from './navidrome.service';
-import { ConfigModule } from '../common/config.module';
+import { NavidromeService } from './infrastructure/navidrome.service';
 
 @Module({
-  imports: [ConfigModule],
   providers: [NavidromeService],
   exports: [NavidromeService],
 })

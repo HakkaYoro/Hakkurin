@@ -1,4 +1,4 @@
-import { ConversationService } from '../src/conversation/conversation.service';
+import { ConversationService } from '../src/conversation/application/conversation.service';
 
 // Sesiones + contexto de canal: las partes sin dependencias (brain/memory) se
 // prueban directamente con mocks vacíos. check_timeouts depende del brain y se

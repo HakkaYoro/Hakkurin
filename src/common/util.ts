@@ -1,7 +1,3 @@
-// Utilerías compartidas. Fuente única para lo que estaba duplicado entre
-// navidrome/gemini (shuffle), slash-commands/navidrome (toArray),
-// discord/music (delay) y conversation/sleep (nowSec).
-
 export function shuffle<T>(arr: T[]): T[] {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -21,9 +17,9 @@ export function delay(ms: number): Promise<void> {
 }
 
 /**
- * Sleep abortable (venía de DiscordService): rechaza con `abortValue` si la señal
- * ya venía abortada o se aborta durante la espera. El valor de aborto lo pasa el
- * llamador (cada módulo compara contra SU símbolo, p.ej. ABORTED de SmartResponseService).
+ * Sleep abortable: rechaza con `abortValue` si la señal ya venía abortada o se
+ * aborta durante la espera. El llamador elige el valor y compara contra SU
+ * símbolo (p.ej. ABORTED del servicio que invoca).
  */
 export function sleepMs(ms: number, signal: AbortSignal, abortValue: unknown): Promise<void> {
   return new Promise((resolve, reject) => {

@@ -1,6 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthGuard } from '../src/web/auth.guard';
-import { ViewService } from '../src/web/view.service';
+import { AuthGuard } from '../src/web/infrastructure/auth.guard';
+import { ViewService } from '../src/web/infrastructure/view.service';
 
 // Phase 5: el WebUI porteado corrige dos deudas del original (web/app.py):
 //  (1) secretos write-only — bot_token/gemini_keys/navidrome_password no se hacen
