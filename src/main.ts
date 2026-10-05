@@ -29,11 +29,13 @@ async function bootstrap() {
   // correlacionar con micro-cortes.
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable();
+  // percentiles() devuelve NANOSEGUNDOS (bug de unidades preexistente: el log
+  // decía "ms" y asustaba con p50 de 10 millones) → /1e6 para ms reales.
   setInterval(() => {
     logTee.log(
-      `[eventloop] p50=${loop.percentile(50).toFixed(1)}ms ` +
-        `p99=${loop.percentile(99).toFixed(1)}ms ` +
-        `p99.9=${loop.percentile(99.9).toFixed(1)}ms`,
+      `[eventloop] p50=${(loop.percentile(50) / 1e6).toFixed(1)}ms ` +
+        `p99=${(loop.percentile(99) / 1e6).toFixed(1)}ms ` +
+        `p99.9=${(loop.percentile(99.9) / 1e6).toFixed(1)}ms`,
     );
   }, 30_000).unref();
 

@@ -67,7 +67,9 @@ export class SidecarClient implements StreamSource {
         }
         this.logger.warn(
           `Sidecar yt-dlp falló tras ${attempt + 1} intento(s) para ${item.url}: ${reason}` +
-            (attempt > 0 ? ' — ¿sidecar caído (crash-loop/stop)? Revisa el contenedor y ytdl_sidecar_url.' : ''),
+            (attempt > 0
+              ? ` — el bot está apuntando a ${this.sidecarUrl()}. ¿Es alcanzable? ¿Está corriendo el contenedor sidecar?`
+              : ''),
         );
         return { streamUrl: '' };
       }
