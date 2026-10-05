@@ -6,12 +6,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { ConfigService } from '../common/config.service';
+import { delay } from '../common/util';
 import { MusicService } from './music.service';
 
 const SIDECAR_DEFAULT = 'http://localhost:7654';
 const CHECK_TIMEOUT_MS = 15_000;
 // pip puede tardar: la respuesta del sidecar llega tras terminar el install.
 const UPDATE_TIMEOUT_MS = 300_000;
+// Tras el self-kill del /update, compose lo reinicia (~2-20s). Si no vuelve en
+// 60s quedó en crash-loop (pip a medias/OOM) — hoy eso era silencio por 1h.
+const RECOVERY_POLL_MS = 5_000;
+const RECOVERY_TIMEOUT_MS = 60_000;
 
 @Injectable()
 export class YtdlUpdaterService {
@@ -34,13 +39,17 @@ export class YtdlUpdaterService {
         this.logger.log('Reproducción activa: la actualización de yt-dlp espera otra hora.');
         return;
       }
-      const base = this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
+      // Misma precedencia que SidecarClient.sidecarUrl(): env de compose > config > default.
+      const base = process.env.YTDL_SIDECAR_URL || this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
       const version = await this.getJson(`${base}/version`);
       if (!version?.installed || !version?.latest) {
         this.logger.warn('Sidecar no reportó versiones (installed/latest); se reintenta en una hora.');
         return;
       }
-      if (version.installed === version.latest) return;
+      // El sidecar nuevo normaliza versiones (PyPI quita ceros: 2026.08.19 ≠
+      // "2026.8.19" por string) y decide con up_to_date; fallback por si el
+      // contenedor aún corre la imagen vieja durante un deploy.
+      if (version.up_to_date ?? version.installed === version.latest) return;
 
       // Doble check: pudo empezar a sonar algo mientras consultábamos PyPI.
       if (!this.music.isIdle()) {
@@ -60,12 +69,33 @@ export class YtdlUpdaterService {
           const reason = e?.cause?.code ?? e?.name ?? e?.message;
           this.logger.warn(`Update de yt-dlp no confirmado (${reason}); se reintenta en una hora.`);
         });
+      await this.awaitSidecarBack(base);
     } catch (e: any) {
       // Sidecar caído o sin red: se reintenta la próxima hora, sin reventar el loop.
       this.logger.warn(`No pude verificar/actualizar yt-dlp: ${e?.message}`);
     } finally {
       this.running = false;
     }
+  }
+
+  // Poll post-restart: si el sidecar no levanta tras el update, avisar YA en vez
+  // de dejar música rota una hora sin señal. No intenta arreglarlo (docker ya
+  // reintenta solo); sólo da visibilidad para los logs exportables.
+  private async awaitSidecarBack(base: string): Promise<void> {
+    const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await delay(RECOVERY_POLL_MS);
+      try {
+        const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
+        if (res.ok) {
+          this.logger.log('Sidecar de vuelta tras el update.');
+          return;
+        }
+      } catch {
+        // aún caído: seguir sondeando hasta el deadline
+      }
+    }
+    this.logger.error('Sidecar NO volvió tras el update de yt-dlp (¿crash-loop?). Revisa `docker logs` del sidecar.');
   }
 
   private async getJson(url: string): Promise<any> {

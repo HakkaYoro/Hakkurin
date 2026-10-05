@@ -21,7 +21,10 @@ export class SidecarClient implements StreamSource {
   constructor(private readonly config: ConfigService) {}
 
   private sidecarUrl(): string {
-    return this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
+    // Env manda sobre config: en compose lo fija YTDL_SIDECAR_URL (docker-compose.yml)
+    // y elimina el paso manual de la WebUI — un config vacío dejaba el default
+    // localhost:7654, que dentro del contenedor del bot es ECONNREFUSED permanente.
+    return process.env.YTDL_SIDECAR_URL || this.config.get<string>('ytdl_sidecar_url', SIDECAR_DEFAULT);
   }
 
   private extractSignal(external?: AbortSignal): AbortSignal {
@@ -42,28 +45,30 @@ export class SidecarClient implements StreamSource {
     const url = `${this.sidecarUrl()}/extract?url=${encodeURIComponent(item.url)}`;
 
     let res: Response;
-    try {
-      // ponytail: AbortSignal.timeout (stdlib) — bounda la llamada; un sidecar
-      // colgado no bloquea playNext indefinidamente.
-      res = await fetch(url, { signal: this.extractSignal(signal) });
-    } catch (e: any) {
-      // "fetch failed" esconde la razón en e.cause (ECONNREFUSED/ENOTFOUND/TimeoutError…).
-      const c = e?.cause;
-      if (e?.name === 'AbortError' || signal?.aborted) return { streamUrl: '' }; // /stop canceló: ni warn ni retry
-      const reason = c?.code ?? c?.syscall ?? c?.hostname ?? e?.name ?? e?.message;
-      // Reinicio reciente del sidecar (/stop) o muerte a mitad de respuesta
-      // (undici "terminated" tras os._exit del /update) → un único reintento tras 3s.
-      const terminated = e?.name === 'TypeError' || String(e?.message).includes('terminated') || String(c?.code).startsWith('UND_ERR');
-      if ((CONN_ERR_CODES.includes(c?.code) || terminated) && !signal?.aborted) {
-        await delay(3_000);
-        try {
-          res = await fetch(url, { signal: this.extractSignal(signal) });
-        } catch (e2: any) {
-          this.logger.warn(`Sidecar yt-dlp falló (2º intento) para ${item.url}: ${e2?.cause?.code ?? e2?.message}`);
-          return { streamUrl: '' };
+    // Reinicio reciente del sidecar (/stop ~2s) o self-kill del /update (restart
+    // de compose puede tardar >10s) → ventanas con ECONNREFUSED. Reintentos a 3s
+    // y 12s cubren ambas; si sigue caído es un problema real (crash-loop/stop).
+    const RETRY_DELAYS_MS = [3_000, 12_000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // ponytail: AbortSignal.timeout (stdlib) — bounda la llamada; un sidecar
+        // colgado no bloquea playNext indefinidamente.
+        res = await fetch(url, { signal: this.extractSignal(signal) });
+        break;
+      } catch (e: any) {
+        // "fetch failed" esconde la razón en e.cause (ECONNREFUSED/ENOTFOUND/TimeoutError…).
+        if (e?.name === 'AbortError' || signal?.aborted) return { streamUrl: '' }; // /stop canceló: ni warn ni retry
+        const c = e?.cause;
+        const reason = c?.code ?? c?.syscall ?? c?.hostname ?? e?.name ?? e?.message;
+        const terminated = e?.name === 'TypeError' || String(e?.message).includes('terminated') || String(c?.code).startsWith('UND_ERR');
+        if ((CONN_ERR_CODES.includes(c?.code) || terminated) && attempt < RETRY_DELAYS_MS.length) {
+          await delay(RETRY_DELAYS_MS[attempt]);
+          continue;
         }
-      } else {
-        this.logger.warn(`Sidecar yt-dlp falló para ${item.url}: ${reason}`);
+        this.logger.warn(
+          `Sidecar yt-dlp falló tras ${attempt + 1} intento(s) para ${item.url}: ${reason}` +
+            (attempt > 0 ? ' — ¿sidecar caído (crash-loop/stop)? Revisa el contenedor y ytdl_sidecar_url.' : ''),
+        );
         return { streamUrl: '' };
       }
     }

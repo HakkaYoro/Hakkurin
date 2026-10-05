@@ -115,6 +115,15 @@ def _latest_version() -> str | None:
         return None
 
 
+def _version_key(v: str) -> tuple[int, ...]:
+    # PyPI normaliza '2026.08.19' → '2026.8.19' (sin ceros); comparar por string
+    # daba "hay update" SIEMPRE → reinicio del sidecar cada hora para nada.
+    try:
+        return tuple(int(p) for p in v.split("."))
+    except ValueError:
+        return (0,)  # formato desconocido: preferir "desactualizado"
+
+
 def _die_soon() -> None:
     # Respuesta sale primero; el proceso muere después (os._exit no deja que
     # uvicorn/starlette lo capture como sys.exit). compose lo reinicia.
@@ -123,7 +132,11 @@ def _die_soon() -> None:
 
 @app.get("/version")
 def version() -> dict[str, Any]:
-    return {"installed": yt_dlp.version.__version__, "latest": _latest_version()}
+    installed = yt_dlp.version.__version__
+    latest = _latest_version()
+    # up_to_date: decisión ya normalizada; latest None (PyPI caído) = no tocar nada.
+    up_to_date = latest is None or _version_key(installed) >= _version_key(latest)
+    return {"installed": installed, "latest": latest, "up_to_date": up_to_date}
 
 
 @app.post("/update")

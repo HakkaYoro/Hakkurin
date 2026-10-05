@@ -9,12 +9,15 @@ services:
       - hakkurin_data:/app/data
     environment:
       - NODE_ENV=production
+      # Fija la URL del sidecar a nivel de entorno (precedencia sobre config.json):
+      # elimina el paso manual de setear ytdl_sidecar_url en la WebUI.
+      - YTDL_SIDECAR_URL=http://sidecar:7654
     depends_on:
       sidecar:
         condition: service_healthy
 
   # Sidecar yt-dlp: interno (no expone puerto al host). El bot lo alcanza en
-  # http://sidecar:7654 — setear ytdl_sidecar_url en la WebUI a ese valor.
+  # http://sidecar:7654 — fijo arriba vía env YTDL_SIDECAR_URL.
   sidecar:
     build: ./sidecar
     restart: unless-stopped

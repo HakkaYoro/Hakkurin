@@ -485,6 +485,26 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     expect((svc as any).state('g1').currentSong).toBe('T');
   });
 
+  it('extract con sidecar caído >3s (post-update) → 3er intento a los 15s salva', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/reset')) return { ok: true, json: async () => ({}) } as any;
+      const n = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract')).length;
+      if (n <= 2) {
+        const err: any = new Error('fetch failed');
+        err.cause = { code: 'ECONNREFUSED' };
+        throw err;
+      }
+      return { ok: true, json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }) } as any;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await vi.advanceTimersByTimeAsync(15000 + 6000); // retries 3s + 12s + prebuffer
+    const extracts = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract'));
+    expect(extracts).toHaveLength(3);
+    expect((svc as any).state('g1').currentSong).toBe('T');
+  });
+
   it('tras /stop la sesión abortada es silenciosa y un /play NUEVO funciona normal', async () => {
     // El playNext abortado (epoch viejo) no envía errores ni recurre; el epoch
     // check post-resolve lo corta antes de crear ffmpeg/player.
@@ -509,5 +529,25 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     await vi.advanceTimersByTimeAsync(6000);
     expect((svc as any).state('g1').currentSong).toBe('Nueva');
     expect(s.isFetching).toBe(false);
+  });
+});
+
+describe('SidecarClient — precedencia de URL (env > config > default)', () => {
+  afterEach(() => {
+    delete process.env.YTDL_SIDECAR_URL;
+    vi.unstubAllGlobals();
+    h.conns.clear();
+  });
+
+  it('env YTDL_SIDECAR_URL manda sobre ytdl_sidecar_url del config (compose)', async () => {
+    process.env.YTDL_SIDECAR_URL = 'http://sidecar:7654';
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('http://sidecar:7654/extract');
   });
 });
