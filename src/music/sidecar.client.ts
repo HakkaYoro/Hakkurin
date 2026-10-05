@@ -49,9 +49,12 @@ export class SidecarClient implements StreamSource {
     } catch (e: any) {
       // "fetch failed" esconde la razón en e.cause (ECONNREFUSED/ENOTFOUND/TimeoutError…).
       const c = e?.cause;
+      if (e?.name === 'AbortError' || signal?.aborted) return { streamUrl: '' }; // /stop canceló: ni warn ni retry
       const reason = c?.code ?? c?.syscall ?? c?.hostname ?? e?.name ?? e?.message;
-      // Reinicio reciente del sidecar (/stop) → un único reintento tras 3s.
-      if (CONN_ERR_CODES.includes(c?.code) && !signal?.aborted) {
+      // Reinicio reciente del sidecar (/stop) o muerte a mitad de respuesta
+      // (undici "terminated" tras os._exit del /update) → un único reintento tras 3s.
+      const terminated = e?.name === 'TypeError' || String(e?.message).includes('terminated') || String(c?.code).startsWith('UND_ERR');
+      if ((CONN_ERR_CODES.includes(c?.code) || terminated) && !signal?.aborted) {
         await delay(3_000);
         try {
           res = await fetch(url, { signal: this.extractSignal(signal) });

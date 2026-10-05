@@ -234,6 +234,7 @@ export class MusicService {
       if (s.isRadioMode) {
         if (s.queue.length === 0) {
           await this.autoQueueRadio(guild.id, channel);
+          if (s.epoch !== epoch) return; // /stop durante la recarga: no dejar cola stale
         } else if (s.queue.length <= 2) {
           void this.autoQueueRadio(guild.id, channel);
         }

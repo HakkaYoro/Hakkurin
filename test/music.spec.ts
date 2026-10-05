@@ -485,8 +485,9 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     expect((svc as any).state('g1').currentSong).toBe('T');
   });
 
-  it('tras /stop la cola vieja no dispara la recursión de error del playNext abortado', async () => {
-    // El finally del playNext abortado no debe pisar isFetching de una sesión nueva.
+  it('tras /stop la sesión abortada es silenciosa y un /play NUEVO funciona normal', async () => {
+    // El playNext abortado (epoch viejo) no envía errores ni recurre; el epoch
+    // check post-resolve lo corta antes de crear ffmpeg/player.
     let releaseFetch: (v: any) => void;
     const gate = new Promise((r) => (releaseFetch = r));
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -496,11 +497,17 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
     const { svc, channel, guild } = makeService();
     await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/vieja' }]);
     await svc.stop(makeInteraction({}));
-    releaseFetch({ ok: false, status: 502, text: async () => 'blocked' });
     await vi.advanceTimersByTimeAsync(2000);
     const s = (svc as any).state('g1');
-    expect(s.isFetching).toBe(false); // resetPlaybackState lo dejó en false y el abortado no lo toca
-    // Sin mensajes de error al canal: la sesión abortada es silenciosa.
-    expect(channel.send).not.toHaveBeenCalled();
+    expect(s.isFetching).toBe(false);
+    expect(channel.send).not.toHaveBeenCalled(); // la sesión abortada es silenciosa (abort, no error)
+
+    // Un /play después del stop: sesión nueva (epoch distinto) reproduce normal.
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/nueva' }]);
+    expect(s.isFetching).toBe(true); // la sesión nueva gestiona su flag
+    releaseFetch({ ok: true, json: async () => ({ stream_url: 'http://127.0.0.1:9/n', title: 'Nueva' }) });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect((svc as any).state('g1').currentSong).toBe('Nueva');
+    expect(s.isFetching).toBe(false);
   });
 });

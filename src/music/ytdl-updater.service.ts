@@ -49,14 +49,17 @@ export class YtdlUpdaterService {
       }
       this.logger.log(`yt-dlp ${version.installed} → ${version.latest}: actualizando sidecar...`);
       // El sidecar responde y a los ~1s se mata a sí mismo; compose lo levanta
-      // fresco. Que la conexión caiga a mitad es el final NORMAL del update.
-      await fetch(`${base}/update`, { method: 'POST', signal: AbortSignal.timeout(UPDATE_TIMEOUT_MS) }).catch(
-        (e: any) => {
+      // fresco. Que la conexión caiga a mitad es el final NORMAL del update;
+      // un 500 (pip falló) o un timeout NO lo son y quedan como warn.
+      await fetch(`${base}/update`, { method: 'POST', signal: AbortSignal.timeout(UPDATE_TIMEOUT_MS) })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`pip falló: HTTP ${res.status}`);
+          this.logger.log('Sidecar actualizado y reiniciándose con el yt-dlp nuevo.');
+        })
+        .catch((e: any) => {
           const reason = e?.cause?.code ?? e?.name ?? e?.message;
-          this.logger.log(`Sidecar cerró durante el update (esperado): ${reason}`);
-        },
-      );
-      this.logger.log('Sidecar actualizado y reiniciándose con el yt-dlp nuevo.');
+          this.logger.warn(`Update de yt-dlp no confirmado (${reason}); se reintenta en una hora.`);
+        });
     } catch (e: any) {
       // Sidecar caído o sin red: se reintenta la próxima hora, sin reventar el loop.
       this.logger.warn(`No pude verificar/actualizar yt-dlp: ${e?.message}`);

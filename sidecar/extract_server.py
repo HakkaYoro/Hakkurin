@@ -131,20 +131,33 @@ def update() -> dict[str, Any]:
     """pip install -U yt-dlp y salida limpia → contenedor reinicia con el paquete
     nuevo. Sin re-buildear imagen. Si pip falla: 500 y el proceso sigue vivo
     (sin crash-loop). El bot solo llama aquí con nada reproduciéndose."""
-    proc = subprocess.run(
-        ["pip", "install", "--no-cache-dir", "--upgrade", "yt-dlp"],
-        capture_output=True, text=True, timeout=300,
-    )
+    global _updating
+    _updating = True
+    try:
+        proc = subprocess.run(
+            ["pip", "install", "--no-cache-dir", "--upgrade", "yt-dlp"],
+            capture_output=True, text=True, timeout=300,
+        )
+    finally:
+        # Matar pip a medias con /reset dejaría site-packages inconsistente →
+        # crash-loop al arrancar. Mientras se instala, /reset no hace nada.
+        _updating = False
     if proc.returncode != 0:
         raise HTTPException(status_code=500, detail=f"pip falló: {proc.stderr[-400:]}")
     _die_soon()
     return {"status": "updated", "version": yt_dlp.version.__version__}
 
 
+_updating = False
+
+
 @app.post("/reset")
 def reset() -> dict[str, str]:
     """Mata el proceso (compose lo reinicia). /stop del bot lo llama para
-    garantizar estado fresco de yt-dlp aunque un extract quede wedged."""
+    garantizar estado fresco de yt-dlp aunque un extract quede wedged.
+    No-op mientras hay un pip en curso (ver /update)."""
+    if _updating:
+        return {"status": "busy"}
     _die_soon()
     return {"status": "resetting"}
 

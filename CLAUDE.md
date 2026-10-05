@@ -30,7 +30,7 @@ original vive en la rama `legacy-python`.
 ## Comandos
 
 ```bash
-npm test              # jest (61 tests)
+npm test              # vitest (194 tests; cwd tmp aislado por archivo vía test/_setup.ts)
 npm run build         # nest build → dist/ (copia templates vía nest-cli assets)
 npm run start:prod    # node dist/main.js
 npm run start:dev     # watch
@@ -43,28 +43,34 @@ docker compose up -d --build   # bot (:30421→8000) + sidecar yt-dlp
 src/
   main.ts                # bootstrap; bind 127.0.0.1 (WEBUI_HOST para exponer)
   app.module.ts          # ScheduleModule.forRoot() + todos los feature modules
-  common/                # ConfigService (data/config.json atómico) — @Global
-  ai/                    # AiBrain interface + GeminiProvider (Gemma primary)
-  memory/                # MemoryService (AES-256-GCM por usuario) + CryptoService
+  common/                # ConfigService (data/config.json atómico) + util.ts — @Global
+  ai/                    # GeminiProvider (motor retry/keys) + ai-prompts + key-rotation
+                         # + context-builder (arma el prompt; desacopla ai→memory)
+  memory/                # MemoryService (política) + memory.repository (AES-256-GCM)
+                         # + memory.queue (cola con dedupe, promoción inyectada)
   conversation/          # Session + ChannelContext, active users, timeouts
-  discord/               # DiscordService (hub+pipeline) + StealthDm/Sleep/SlashCommands
-  music/                 # MusicService (por guild) + @discordjs/voice
+  discord/               # DiscordService (gateway+scheduler @Interval) + use-cases:
+                         # smart-response, reminder, holiday, music-ui + StealthDm/Sleep
+  music/                 # MusicService (casos de uso+voz) + domain/ports puros +
+                         # sidecar.client + ffmpeg.adapter + presenter + ytdl-updater
   navidrome/             # Subsonic REST, auth MD5-salt
   scheduler/             # ActionParserService (parser fenced-JSON de recordatorios)
-  web/                   # WebController + ViewService (nunjucks) + AuthGuard
+  web/                   # WebController (via puerto BotLifecycle) + ViewService + AuthGuard
   web/templates/         # _base.html + index/memories/memory_view (CSS neón)
-sidecar/                 # extract_server.py — yt-dlp HTTP (/extract?url=)
-test/                    # jest (NO confundir con tests/ legacy, borrado)
+sidecar/                 # extract_server.py — yt-dlp HTTP: /extract, /version,
+                         # /update (pip -U + exit → compose reinicia), /reset (kill)
+test/                    # vitest (NO confundir con tests/ legacy, borrado)
 data/                    # config.json (SECRETS, gitignored), memory/, holidays.json, status_messages.json
 ```
 
 ## Arquitectura clave
 
-- **`DiscordService`** (`src/discord/discord.service.ts`) es el hub: gateway de eventos,
-  pipeline de mensajes (debounce 5s abortable, espera typing hasta 8s, send con delays de
-  escritura), y aloja los **6 loops `@Interval(60000)`** (recordatorios, timeouts, cola de
-  memoria, recovery, holidays, voice vacío). Los loops tienen guard de reentrada porque
-  `@Interval` (setInterval) NO es secuencial como `@tasks.loop` de discord.py.
+- **`DiscordService`** (`src/discord/discord.service.ts`) es el gateway + scheduler:
+  aloja los **6 loops `@Interval(60000)`** con guard de reentrada (`@Interval` NO es
+  secuencial como `@tasks.loop`). Los use-cases viven delegados: `SmartResponseService`
+  (pipeline de mensajes: debounce 5s abortable, espera typing, send con delays de
+  escritura), `ReminderService` (dedupe en memoria), `HolidayService` (calendario
+  GMT-4 + dedupe por archivo).
 - **`AiBrain`** (`@Inject('AiBrain')`): `analyzeInteraction` (decide intent:
   reply/complain/new_topic/ignore/error), `generateResponse`, `generateSummary`,
   `generateHolidayGreeting`, `testApiConnection`, `reloadConfig`. Gemma no soporta JSON
@@ -74,6 +80,18 @@ data/                    # config.json (SECRETS, gitignored), memory/, holidays.
 - **Sidecar yt-dlp**: el bot resuelve YouTube con `GET {ytdl_sidecar_url}/extract?url=`
   (default `http://localhost:7654`, `http://sidecar:7654` en compose). No descarga, sólo
   extrae la URL directa de stream; ffmpeg corre del lado de @discordjs/voice.
+- **Auto-update de yt-dlp**: `YtdlUpdaterService` (`src/music/ytdl-updater.service.ts`)
+  corre cada hora; solo actualiza si `MusicService.isIdle()` (nadie reproduce ni
+  extrae). Consulta `GET /version` (instalada vs PyPI) y con diferencias hace
+  `POST /update`: el sidecar hace `pip install -U yt-dlp` y se mata a sí mismo
+  (`os._exit` diferido) → compose `restart: unless-stopped` lo levanta fresco, sin
+  re-buildear la imagen. Si suena algo, el propio intervalo re-verifica en 1h.
+- **/stop hard-kill**: `resetPlaybackState` incrementa `epoch` por guild y aborta el
+  `AbortController` del extract; `playNext` verifica el epoch tras CADA await
+  (fetch 20s + prebuffer 5s) → un /stop no deja ffmpeg zombie ni player colgado.
+  /stop además hace `POST /reset` al sidecar (mata el proceso yt-dlp wedged;
+  compose lo reinicia en ~2s) y `SidecarClient` reintenta el extract una vez ante
+  ECONNREFUSED para cubrir ese hueco.
 
 ## Reglas de seguridad (NO romper)
 
@@ -90,7 +108,7 @@ data/                    # config.json (SECRETS, gitignored), memory/, holidays.
 - **Modo Ponytail**: marca simplificaciones deliberadas con comentarios `ponytail:` (nombran
   el techo y el upgrade path). Stdlib antes que deps. El código más corto que funcione.
 - Patron por feature: escribir → revisión adversarial (Sonnet) contra el fuente relevante →
-  corregir → `npx tsc --noEmit` + `npx jest`.
+  corregir → `npx tsc --noEmit` + `npm test` (vitest).
 - La verify de voz/sidecar/Navidrome/Discord es **en vivo** (servidor real), no headless.
 
 ## Config (`data/config.json`)
