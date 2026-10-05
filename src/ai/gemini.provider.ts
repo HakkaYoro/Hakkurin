@@ -23,7 +23,9 @@ import { ContextBuilderService, type ContextBuilder } from './context-builder.se
 import type { AiBrain, AnalysisResult, InteractionContext } from './ai-brain.interface';
 
 // Motor del cerebro (puerto de core/ai_handler.py, GeminiBrain). NanoGPT/OpenAI eliminado.
-// Modelo PRINCIPAL: gemma-4-26b-a4b-it. FALLBACK: gemini-2.5-flash / gemini-3-flash-preview.
+// Modelos PRINCIPALES: gemma-4-31b-it / gemma-4-26b-a4b-it (IDs verificados en
+// ListModels; el shuffle los alterna por request para repartir cuota). FALLBACK:
+// gemini-2.5-flash / gemini-3-flash-preview.
 // (inversión de ai_handler.py:358-359 — el usuario pidió Gemma como principal.)
 //
 // El contenido (prompts) vive en ai-prompts.ts; el armado del contexto de interacción
@@ -36,7 +38,10 @@ import type { AiBrain, AnalysisResult, InteractionContext } from './ai-brain.int
 //   contra la API real con una key configurada.
 
 const GEMMA_TOKEN_BUDGET_PER_MIN = 15000;
-const PRIMARY_MODELS = ['gemma-4-26b-a4b-it'];
+// Primarios alternados por request (shuffle en generateWithRetry): reparte cuota
+// entre ambos Gemma 4; si uno da 429 el ladder prueba el otro y luego los gemini.
+// export: los tests asertan contra esta lista (el shuffle la hace aleatoria).
+export const PRIMARY_MODELS = ['gemma-4-31b-it', 'gemma-4-26b-a4b-it'];
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-3-flash-preview'];
 const FALLBACK_DURATION_S = 2400; // 40 min
 

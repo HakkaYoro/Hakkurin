@@ -4,8 +4,10 @@ import { MemoryService } from '../memory/memory.service';
 import { formatGmt4, buildInteractionPrompt } from './ai-prompts';
 import type { InteractionContext } from './ai-brain.interface';
 
-// Presupuesto total del prompt (~800k chars) — antes en gemini.provider.ts.
-const MAX_TOTAL_CHARS = 800_000;
+// Presupuesto total del prompt: ~16k tokens de contexto (los Gemma 4 de la API
+// aceptan 256k, pero el cap mantiene cada prompt dentro del presupuesto Gemma
+// por minuto de 15000 tokens) a ~4 chars/token, con margen para la salida.
+const MAX_TOTAL_CHARS = 60_000;
 
 export interface BuiltInteractionPrompt {
   prompt: string;

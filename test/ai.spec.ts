@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { GeminiProvider } from '../src/ai/gemini.provider';
+import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/gemini.provider';
 import { ConfigService } from '../src/common/config.service';
 import type { InteractionContext } from '../src/ai/ai-brain.interface';
 
@@ -69,9 +69,10 @@ describe('GeminiProvider (contracto AiBrain)', () => {
     expect(res.ping_users).toEqual(['9']);
     expect(res.reply_to_message_id).toBeNull();
 
-    // Gemma es primary → primer modelo intentado contiene "gemma"
+    // Gemma es primary → primer modelo intentado es uno de los primarios
+    // (el shuffle los alterna; el orden exacto es aleatorio).
     const calledModel = generateContent.mock.calls[0][0].model;
-    expect(calledModel).toContain('gemma-4-26b-a4b-it');
+    expect(PRIMARY_MODELS).toContain(calledModel);
   });
 
   it('normalize response_content: string suelto → array de 1', async () => {

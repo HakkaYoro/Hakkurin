@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { GeminiProvider } from '../src/ai/gemini.provider';
+import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/gemini.provider';
 import { ConfigService } from '../src/common/config.service';
 import type { InteractionContext } from '../src/ai/ai-brain.interface';
 
@@ -66,12 +66,12 @@ describe('GeminiProvider — generateSummary', () => {
   it('perfil de usuario: prompt de gestor de memoria con el ID del usuario', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: 'perfil nuevo' });
     const p = makeProvider(generateContent);
-    const out = await p.generateSummary('viejo', ['nueva interacción'], '777', 'gemma-4-26b-a4b-it');
+    const out = await p.generateSummary('viejo', ['nueva interacción'], '777', PRIMARY_MODELS[0]);
     expect(out).toBe('perfil nuevo');
     const arg = generateContent.mock.calls[0][0];
     expect(arg.contents).toContain('gestor de memoria a largo plazo');
     expect(arg.contents).toContain('777');
-    expect(arg.model).toBe('gemma-4-26b-a4b-it'); // modelo forzado
+    expect(arg.model).toBe(PRIMARY_MODELS[0]); // modelo forzado
   });
 
   it('fallo total → null (el llamador decide qué hacer)', async () => {
@@ -95,9 +95,10 @@ describe('GeminiProvider — generateResponse', () => {
 });
 
 describe('GeminiProvider — modo fallback persistente', () => {
-  it('gemma falla → fallback gemini responde; la SIGUIENTE llamada va directo a fallback', async () => {
+  it('gemmas fallan → fallback gemini responde; la SIGUIENTE llamada va directo a fallback', async () => {
     const generateContent = vi.fn()
-      // 1ª llamada: gemma 500 → break; 2ª: gemini-2.5-flash ok
+      // 1ª y 2ª: los dos primarios gemma 500 → break; 3ª: gemini-2.5-flash ok
+      .mockRejectedValueOnce(new Error('500 internal'))
       .mockRejectedValueOnce(new Error('500 internal'))
       .mockResolvedValueOnce({ text: 'via fallback' })
       // siguientes llamadas: flash ok directo
@@ -106,20 +107,23 @@ describe('GeminiProvider — modo fallback persistente', () => {
     await expect(p.generateResponse('x')).resolves.toBe('via fallback');
 
     const models1 = generateContent.mock.calls.map((c: any[]) => c[0].model);
-    expect(models1[0]).toBe('gemma-4-26b-a4b-it');
-    expect(models1[1]).toBe('gemini-2.5-flash');
+    // shuffle: los dos primeros intentos son los primarios en orden aleatorio
+    expect(PRIMARY_MODELS).toContain(models1[0]);
+    expect(PRIMARY_MODELS).toContain(models1[1]);
+    expect(models1[2]).toBe('gemini-2.5-flash');
 
     // fallbackUntil activo → la 2ª petición NO reintenta gemma.
     await expect(p.generateResponse('y')).resolves.toBe('via fallback 2');
     const models2 = generateContent.mock.calls.map((c: any[]) => c[0].model);
-    expect(models2.slice(2)).not.toContain('gemma-4-26b-a4b-it'); // tras la 1ª ronda, solo fallback
+    expect(models2.slice(3).some((m) => m.includes('gemma'))).toBe(false); // tras la 1ª ronda, solo fallback
   });
 });
 
 describe('GeminiProvider — web_search two-pass (solo modelos gemini)', () => {
   it('function call web_search → ejecuta búsqueda y re-llama con functionResponse', async () => {
     const generateContent = vi.fn()
-      .mockRejectedValueOnce(new Error('500 internal')) // gemma cae
+      .mockRejectedValueOnce(new Error('500 internal')) // gemma 31b cae
+      .mockRejectedValueOnce(new Error('500 internal')) // gemma 26b cae
       // 1ª a flash: pide web_search
       .mockResolvedValueOnce({
         text: '',
@@ -141,8 +145,9 @@ describe('GeminiProvider — web_search two-pass (solo modelos gemini)', () => {
 
     expect(out.intent).toBe('reply');
     expect(out.response_content).toEqual(['hace sol']);
-    // La 3ª llamada (flash, second pass) incluye el functionResponse con el resultado DDG.
-    const third = generateContent.mock.calls[2][0];
+    // La 2ª pasada de flash (tras los 2 gemmas + 1ª flash) incluye el
+    // functionResponse con el resultado DDG.
+    const third = generateContent.mock.calls[3][0];
     expect(third.model).toBe('gemini-2.5-flash');
     const parts = third.contents[2].parts;
     expect(parts[0].functionResponse.name).toBe('web_search');
@@ -173,7 +178,7 @@ describe('GeminiProvider — analyzeInteraction extras', () => {
     const p = makeProvider(generateContent);
     await p.analyzeInteraction(ctx());
     const arg = generateContent.mock.calls[0][0];
-    expect(arg.model).toBe('gemma-4-26b-a4b-it');
+    expect(PRIMARY_MODELS).toContain(arg.model); // el shuffle elige el primario
     expect(arg.config.responseMimeType).toBeUndefined();
   });
 
