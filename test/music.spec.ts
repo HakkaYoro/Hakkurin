@@ -382,3 +382,27 @@ describe('MusicService — reproducción (voz fake)', () => {
     expect((svc as any).state('g1').queue).toEqual([]);
   });
 });
+
+describe('MusicService — isIdle (para el auto-update del sidecar)', () => {
+  afterEach(() => {
+    h.conns.clear();
+  });
+
+  it('sin guilds ni actividad → idle', () => {
+    const { svc } = makeService();
+    expect(svc.isIdle()).toBe(true);
+  });
+
+  it('player no-Idle en algún guild → NO idle', () => {
+    const { svc } = makeService();
+    const s = (svc as any).state('g1');
+    s.player = { state: { status: 'playing' }, stop: vi.fn(), play: vi.fn(), on: vi.fn() };
+    expect(svc.isIdle()).toBe(false);
+  });
+
+  it('isFetching (extract en vuelo) → NO idle', () => {
+    const { svc } = makeService();
+    (svc as any).state('g2').isFetching = true;
+    expect(svc.isIdle()).toBe(false);
+  });
+});

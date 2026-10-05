@@ -86,6 +86,15 @@ export class MusicService {
     return s.currentSong;
   }
 
+  /** true si NINGÚN guild está reproduciendo o extrayendo stream. Lo consume
+   *  YtdlUpdaterService para decidir si el sidecar puede reiniciarse. */
+  isIdle(): boolean {
+    for (const s of this.guilds.values()) {
+      if (isBusy(s) || s.isFetching) return false;
+    }
+    return true;
+  }
+
   // --- Conexión de voz ---
   private voiceChannelOf(member: GuildMember) {
     return (member.voice?.channel as { id: string; guild: { voiceAdapterCreator: any } } | null) ?? null;

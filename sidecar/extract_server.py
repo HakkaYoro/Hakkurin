@@ -11,9 +11,13 @@ Sin autenticación; pensado para correr en la red interna del compose junto al b
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 import sys
+import threading
+import urllib.request
 from typing import Any
 
 import yt_dlp
@@ -93,6 +97,56 @@ def _extract(url: str, stream: bool) -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# --- Auto-actualización (el bot decide CUÁNDO; el sidecar solo obedece) ---
+# El bucle horario vive en el bot (ytdl-updater.service.ts) porque el estado
+# "está reproduciendo algo" es suyo. Aquí: consultar versión, actualizar pip y
+# salir para que compose (restart: unless-stopped) levante el proceso fresco.
+
+PYPI_JSON_URL = "https://pypi.org/pypi/yt-dlp/json"
+
+
+def _latest_version() -> str | None:
+    try:
+        with urllib.request.urlopen(PYPI_JSON_URL, timeout=10) as res:
+            return json.load(res).get("info", {}).get("version")
+    except Exception:
+        return None
+
+
+def _die_soon() -> None:
+    # Respuesta sale primero; el proceso muere después (os._exit no deja que
+    # uvicorn/starlette lo capture como sys.exit). compose lo reinicia.
+    threading.Timer(1.0, lambda: os._exit(0)).start()
+
+
+@app.get("/version")
+def version() -> dict[str, Any]:
+    return {"installed": yt_dlp.version.__version__, "latest": _latest_version()}
+
+
+@app.post("/update")
+def update() -> dict[str, Any]:
+    """pip install -U yt-dlp y salida limpia → contenedor reinicia con el paquete
+    nuevo. Sin re-buildear imagen. Si pip falla: 500 y el proceso sigue vivo
+    (sin crash-loop). El bot solo llama aquí con nada reproduciéndose."""
+    proc = subprocess.run(
+        ["pip", "install", "--no-cache-dir", "--upgrade", "yt-dlp"],
+        capture_output=True, text=True, timeout=300,
+    )
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"pip falló: {proc.stderr[-400:]}")
+    _die_soon()
+    return {"status": "updated", "version": yt_dlp.version.__version__}
+
+
+@app.post("/reset")
+def reset() -> dict[str, str]:
+    """Mata el proceso (compose lo reinicia). /stop del bot lo llama para
+    garantizar estado fresco de yt-dlp aunque un extract quede wedged."""
+    _die_soon()
+    return {"status": "resetting"}
 
 
 @app.get("/extract")
