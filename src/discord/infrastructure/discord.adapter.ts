@@ -213,7 +213,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
 
     let shouldProcess = isMentioned || isReply || wasActive || isChannelEngaged || isDm;
     if (!shouldProcess) {
-      const replyProb = this.config.get<number>('reply_probability', 0.01);
+      const replyProb = this.config.get<number>('reply_probability', 0.125);
       if (Math.random() < replyProb) {
         shouldProcess = true;
         this.logger.debug(`Trigger por probabilidad (${replyProb}) para ${message.author.displayName}`);
