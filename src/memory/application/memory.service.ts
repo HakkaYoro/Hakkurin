@@ -1,10 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EncryptorPort, MemoryQueuePort, MemoryRepositoryPort } from '../domain/ports/memory.ports';
 import { UserMemory, UserMemoryAggregate } from '../domain/entities/user-memory.aggregate';
-
-// Shapes de persistencia; los consumidores siguen importándolos de aquí.
-export { UserMemory, UserProfile } from '../domain/entities/user-memory.aggregate';
 
 const STALE_BUFFER_SECONDS = 1800;
 
@@ -16,7 +12,6 @@ export class MemoryService implements OnModuleInit {
     private readonly crypto: EncryptorPort,
     private readonly repo: MemoryRepositoryPort,
     private readonly queue: MemoryQueuePort,
-    private readonly events: EventEmitter2,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -40,7 +35,6 @@ export class MemoryService implements OnModuleInit {
     const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id), user_id);
     const shouldSummarize = agg.appendInteraction(text);
     await this.repo.saveMemory(user_id, agg.raw);
-    this.publishDomainEvents(agg);
     return shouldSummarize;
   }
 
@@ -78,11 +72,6 @@ export class MemoryService implements OnModuleInit {
     agg.applySummary(newSummary, processedInteractions);
     await this.repo.saveMemory(user_id, agg.raw);
     await this.repo.saveSummaryPlaintext(user_id, agg.raw.summary);
-    this.publishDomainEvents(agg);
-  }
-
-  private publishDomainEvents(agg: UserMemoryAggregate): void {
-    for (const e of agg.pullDomainEvents()) this.events.emit(e.event, e);
   }
 
   async getUsersWithPendingBuffer(): Promise<string[]> {

@@ -1,21 +1,17 @@
 """Sidecar yt-dlp — puerto NestJS llama aquí para extraer info de YouTube.
 
-GET /extract?url=<video-or-search>&stream=1
-  -> {"stream_url": ..., "title": ..., "uploader": ...}  (stream=True, sin descargar)
-POST /extract  body {"url": ..., "stream": true}
-  -> idem
+GET /extract?url=<video-or-search>
+  -> {"stream_url": ..., "title": ...}  (URL directa de audio, sin descargar)
 
 Sin autenticación; pensado para correr en la red interna del compose junto al bot.
- ponytail: no descarga, solo extrae la URL directa de stream (igual que
- music_manager.py:43-51 con stream=True). ffmpeg corre del lado de @discordjs/voice.
+ ponytail: no descarga, solo extrae la URL directa de stream; ffmpeg corre del
+ lado de @discordjs/voice.
 """
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import sys
 import threading
 import urllib.request
 from typing import Any
@@ -23,7 +19,6 @@ from typing import Any
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 YTDL_OPTS = {
     "format": "bestaudio/best",
@@ -45,21 +40,10 @@ app.add_middleware(
 )
 
 
-class ExtractIn(BaseModel):
-    url: str
-    stream: bool = True
-
-
-def _extract(url: str, stream: bool) -> dict[str, Any]:
-    # stream=True => no descargar; devolver data['url'] (URL directa del audio).
-    opts = {**YTDL_OPTS}
-    if not stream:
-        # rutas de descarga no se usan hoy, pero se respeta el flag.
-        opts["outtmpl"] = "/tmp/hakkurin-ytdl/%(id)s.%(ext)s"
-
+def _extract(url: str) -> dict[str, Any]:
     try:
-        with yt_dlp.YoutubeDL(opts) as ytdl:
-            data = ytdl.extract_info(url, download=not stream)
+        with yt_dlp.YoutubeDL({**YTDL_OPTS}) as ytdl:
+            data = ytdl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError as e:
         raise HTTPException(status_code=502, detail=f"yt-dlp error: {e}")
 
@@ -72,7 +56,7 @@ def _extract(url: str, stream: bool) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="playlist vacía")
         data = entries[0]
 
-    stream_url = data.get("url") if stream else data.get("_filename") or data.get("filepath")
+    stream_url = data.get("url")
     if not stream_url:
         # algunos extractores guardan la URL en formats[]; tomar la mejor.
         fmts = data.get("formats") or []
@@ -89,8 +73,6 @@ def _extract(url: str, stream: bool) -> dict[str, Any]:
     return {
         "stream_url": stream_url,
         "title": data.get("title", "Unknown"),
-        "uploader": data.get("uploader") or data.get("channel") or "Unknown",
-        "duration": data.get("duration"),
     }
 
 
@@ -176,13 +158,8 @@ def reset() -> dict[str, str]:
 
 
 @app.get("/extract")
-def extract_get(url: str = Query(...), stream: bool = True) -> dict[str, Any]:
-    return _extract(url, stream)
-
-
-@app.post("/extract")
-def extract_post(body: ExtractIn) -> dict[str, Any]:
-    return _extract(body.url, body.stream)
+def extract_get(url: str = Query(...)) -> dict[str, Any]:
+    return _extract(url)
 
 
 if __name__ == "__main__":

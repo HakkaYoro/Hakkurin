@@ -12,7 +12,6 @@ export interface HakkurinConfig {
   system_prompt: string;
   reply_probability: number;
   developer_id: string;
-  nanogpt_api_key?: string; // legacy: se ignora; sólo se mantiene para no romper configs existentes
   navidrome_base_url?: string;
   navidrome_external_url?: string;
   navidrome_username?: string;

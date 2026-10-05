@@ -1,6 +1,4 @@
 // El shape JSON persistido no cambia (compat con las .enc ya escritas).
-import { MemoryAppendedEvent } from '../events/memory-appended.event';
-import { MemorySummaryCreatedEvent } from '../events/memory-summary-created.event';
 
 export interface UserProfile {
   name: string;
@@ -95,8 +93,6 @@ function arraysEqual(a: string[], b: string[]): boolean {
 }
 
 export class UserMemoryAggregate {
-  private _domainEvents: (MemoryAppendedEvent | MemorySummaryCreatedEvent)[] = [];
-
   private constructor(
     private readonly mem: UserMemory,
     private readonly ownerId: string | null,
@@ -110,18 +106,10 @@ export class UserMemoryAggregate {
     return this.mem;
   }
 
-  /** El servicio de aplicación drena y publica tras persistir con éxito. */
-  pullDomainEvents(): (MemoryAppendedEvent | MemorySummaryCreatedEvent)[] {
-    const events = this._domainEvents;
-    this._domainEvents = [];
-    return events;
-  }
-
   /** El texto llega ya validado (no vacío). */
   appendInteraction(text: string): boolean {
     this.mem.history_buffer.push(text);
     this.mem.interaction_count += 1;
-    if (this.ownerId) this._domainEvents.push(new MemoryAppendedEvent(this.ownerId));
     return this.needsSummary(Date.now() / 1000);
   }
 
@@ -152,9 +140,6 @@ export class UserMemoryAggregate {
     }
 
     this.mem.last_summary_time = Date.now() / 1000;
-    if (this.ownerId && this.mem.summary) {
-      this._domainEvents.push(new MemorySummaryCreatedEvent(this.ownerId));
-    }
   }
 
   touchChannel(channelId: any): void {

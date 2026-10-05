@@ -1,6 +1,5 @@
 import { promises as fsPromises } from 'fs';
 import * as path from 'path';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
 import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
@@ -48,7 +47,7 @@ describe('MemoryService', () => {
   beforeEach(async () => {
     cryptoSvc = new CryptoAdapter();
     repo = new MemoryRepositoryAdapter(cryptoSvc);
-    mem = new MemoryService(cryptoSvc, repo, new MemoryQueueAdapter(), new EventEmitter2());
+    mem = new MemoryService(cryptoSvc, repo, new MemoryQueueAdapter());
     await cryptoSvc.onModuleInit();
     await mem.onModuleInit();
   });

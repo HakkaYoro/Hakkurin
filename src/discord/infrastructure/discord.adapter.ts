@@ -8,7 +8,6 @@ import {
   Events,
   GatewayIntentBits,
   Partials,
-  PermissionFlagsBits,
   PresenceUpdateStatus,
   type Message,
 } from 'discord.js';
@@ -34,8 +33,6 @@ import { BotLifecycle } from '../../web/application/ports/bot-lifecycle.port';
 export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTransportPort, BotStatePort, BotLifecycle {
   private readonly logger = new Logger(DiscordAdapter.name);
   private client: Client | null = null;
-  private ready: Promise<void>;
-  private readyResolve!: () => void;
 
   private readonly pending = new Map<string, AbortController>();
   private readonly typingUsers = new Map<string, Set<string>>();
@@ -59,9 +56,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     private readonly smartResponse: SmartResponseService,
     private readonly reminders: ReminderService,
     private readonly holidays: HolidayService,
-  ) {
-    this.ready = new Promise((r) => (this.readyResolve = r));
-  }
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.start();
@@ -71,19 +66,10 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     await this.client?.destroy();
   }
 
-  getClient(): Client | null {
-    return this.client;
-  }
-
-  whenReady(): Promise<void> {
-    return this.ready;
-  }
-
   async start(): Promise<void> {
     const token = this.config.get<string>('bot_token');
     if (!token) {
       this.logger.warn('Sin bot_token en config. Discord no arranca.');
-      this.readyResolve();
       return;
     }
     this.client = new Client({
@@ -114,7 +100,6 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     this.pending.clear();
     this.typingUsers.clear();
     await this.brain.reloadConfig();
-    this.ready = new Promise((r) => (this.readyResolve = r));
     await this.start();
   }
 
@@ -137,7 +122,6 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
 
   private async onReady(): Promise<void> {
     this.logger.log(`Conectado como ${this.client!.user!.tag} (ID: ${this.client!.user!.id})`);
-    this.readyResolve();
     await this.slashCommands.register(this.client!);
     await this.updateBotStatus('idle');
   }
@@ -210,7 +194,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     // evita gastar una llamada de IA.
     if (message.content.trim() === '!sync') return;
 
-    this.logDmDebug(message, 'INPUT');
+    this.logDmDebug(message);
 
     const session = this.conversation.createOrUpdateSession(
       channelId,
@@ -460,10 +444,6 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     await this.client?.destroy();
   }
 
-  async celebrateHoliday(holidayName: string): Promise<void> {
-    await this.holidays.celebrateHoliday(holidayName);
-  }
-
   // Si aún no hay cliente listo, el intento del loop es no-op y reintenta al minuto.
   @Interval(60000)
   async checkTimeoutsLoop(): Promise<void> {
@@ -538,20 +518,14 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     }
   }
 
-  private logDmDebug(message: Message, phase: 'INPUT' | 'OUTPUT'): void {
+  private logDmDebug(message: Message): void {
     if (!this.config.get<boolean>('debug_dm', false)) return;
     if (!(message.channel instanceof DMChannel)) return;
-    if (phase === 'INPUT') {
-      this.logger.debug(`[DM INPUT] De: ${message.author.displayName} (ID: ${message.author.id})`);
-      this.logger.debug(`[DM INPUT] Contenido: ${message.content}`);
-    }
+    this.logger.debug(`[DM INPUT] De: ${message.author.displayName} (ID: ${message.author.id})`);
+    this.logger.debug(`[DM INPUT] Contenido: ${message.content}`);
   }
 
   setLastActiveChannel(channelId: string): void {
     this.lastActiveChannelId = channelId;
-  }
-
-  isAdmin(message: Message): boolean {
-    return !!message.member?.permissions.has(PermissionFlagsBits.Administrator);
   }
 }

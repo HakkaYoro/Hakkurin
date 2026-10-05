@@ -76,16 +76,15 @@ describe('GeminiAdapter (contracto AiBrain)', () => {
     expect(PRIMARY_MODELS).toContain(calledModel);
   });
 
-  it('normalize response_content: string suelto → array de 1', async () => {
+  it('JSON crudo sin fences: response_content string se normaliza a array de 1', async () => {
     const generateContent = vi.fn().mockResolvedValue({
       text: '{"is_talking_to_me":false,"intent":"ignore","response_content":"una sola cadena","ping_users":[]}',
       functionCalls: undefined,
     });
     const provider = makeProvider(generateContent);
     const res = await provider.analyzeInteraction(ctx());
-    // El proveedor devuelve lo que parsea; el pipeline de Discord normaliza string→[string].
-    // Aquí solo aseguramos que llega sin romper.
     expect(res.intent).toBe('ignore');
+    expect(res.response_content).toEqual(['una sola cadena']);
   });
 
   it('cuota agotada en todos los intentos → client null → intent "ignore" (Python :664)', async () => {

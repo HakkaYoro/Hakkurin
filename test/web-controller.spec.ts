@@ -1,5 +1,4 @@
 import { WebController } from '../src/web/infrastructure/web.controller';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
 import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
@@ -29,7 +28,7 @@ class MockConfig extends ConfigService {
 function makeController() {
   const config = new MockConfig();
   const cryptoSvc = new CryptoAdapter();
-  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter(), new EventEmitter2());
+  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter());
   const discord = { forceShutdownAndSummarize: vi.fn(async () => {}), restart: vi.fn(async () => {}) } as any;
   const brain = { reloadConfig: vi.fn(async () => {}) } as any;
   const view = { render: vi.fn(async () => '<html>ok</html>') } as any;

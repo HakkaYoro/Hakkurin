@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { DiscordAPIError, PermissionFlagsBits } from 'discord.js';
+import { DiscordAPIError } from 'discord.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DiscordAdapter } from '../src/discord/infrastructure/discord.adapter';
 import { SmartResponseService } from '../src/discord/application/smart-response.service';
@@ -66,7 +66,7 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   Object.assign(config.store, store);
   const cryptoSvc = new CryptoAdapter();
   const events = new EventEmitter2();
-  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter(), events);
+  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter());
   const conversation = new ConversationService(brain, memory);
   const parser = new ActionParserService();
   const music = { getNowPlaying: vi.fn(() => null), checkEmptyVoiceChannels: vi.fn(async () => {}) } as any;
@@ -135,7 +135,7 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
     smartResponse, reminders, holidays,
   );
   ref.svc = svc;
-  return { svc, config, memory, conversation, brain, client: makeClient() };
+  return { svc, config, memory, conversation, brain, holidays, client: makeClient() };
 }
 
 function fakeMsg(over: Record<string, any> = {}): any {
@@ -378,15 +378,6 @@ describe('DiscordAdapter — presencia y envío', () => {
     expect(client.users.fetch).toHaveBeenCalledWith('43');
     expect(userSend).toHaveBeenCalledWith('dm global');
   });
-
-  it('isAdmin: solo miembros con permiso Administrator', () => {
-    const { svc } = makeService();
-    const admin = { member: { permissions: { has: vi.fn((p: bigint) => p === PermissionFlagsBits.Administrator) } } };
-    expect(svc.isAdmin(admin as any)).toBe(true);
-    const pleb = { member: { permissions: { has: vi.fn(() => false) } } };
-    expect(svc.isAdmin(pleb as any)).toBe(false);
-    expect(svc.isAdmin({ member: null } as any)).toBe(false);
-  });
 });
 
 describe('DiscordAdapter — memoria y loops', () => {
@@ -531,11 +522,10 @@ describe('DiscordAdapter — festividades', () => {
   });
 
   it('celebrateHoliday salta usuarios sin canal conocido (no gasta LLM)', async () => {
-    const { svc, memory, brain, client } = makeService();
+    const { holidays, memory, brain } = makeService();
     await memoryReady(memory);
-    (svc as any).client = client;
     await memory.saveMemory('51', { last_channel_id: null } as any); // sin canal
-    await svc.celebrateHoliday('Año Nuevo');
+    await holidays.celebrateHoliday('Año Nuevo');
     expect(brain.generateHolidayGreeting).not.toHaveBeenCalled();
   });
 });

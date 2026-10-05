@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   ChannelType,
   EmbedBuilder,
@@ -38,7 +37,6 @@ export class MusicService {
     @Inject(AudioPipeline) private readonly pipeline: AudioPipeline,
     @Inject(MusicPresenter) private readonly presenter: MusicPresenter,
     @Inject(VoiceConnectionPort) private readonly voice: VoiceConnectionPort,
-    private readonly events: EventEmitter2,
   ) {}
 
   private state(guildId: string): GuildMusicState {
@@ -138,7 +136,6 @@ export class MusicService {
         await this.presenter.nowPlaying(
           channel, s.currentSong ?? '', item.type === 'navidrome' ? item.cover_url : null,
         );
-        this.publishDomainEvents(s);
       } else {
         s.markIdle();
       }
@@ -168,13 +165,7 @@ export class MusicService {
     const st = this.state(guildId);
     this.pipeline.killCurrent(st);
     st.isFetching = false;
-    st.trackEnded(guildId);
-    this.publishDomainEvents(st);
     if (st.textChannel) void this.playNext(guildId, st.textChannel);
-  }
-
-  private publishDomainEvents(s: GuildMusicState): void {
-    for (const e of s.pullDomainEvents()) this.events.emit(e.event, e);
   }
 
   private async autoQueueRadio(guildId: string, channel: ChannelHandle): Promise<void> {

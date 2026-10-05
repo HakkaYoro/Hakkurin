@@ -3,7 +3,6 @@ import { nowSec } from '../../../common/util';
 export class Session {
   lastInteraction: number;
   isActive = false;
-  ignoredCount = 0;
   private context: { ts: number; content: string }[] = [];
 
   constructor(

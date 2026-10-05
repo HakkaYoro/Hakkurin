@@ -22,7 +22,6 @@
     "@noble/ciphers": "^2.2.0",
     "@snazzah/davey": "^0.1.12",
     "@stablelib/xchacha20poly1305": "^2.0.1",
-    "axios": "^1.7.0",
     "discord.js": "^14.16.0",
     "libsodium-wrappers": "^0.8.4",
     "nunjucks": "^3.2.4",
@@ -35,7 +34,6 @@
     "@nestjs/cli": "^11.0.0",
     "@types/node": "^22.0.0",
     "@types/nunjucks": "^3.2.6",
-    "ts-node": "^10.9.0",
     "typescript": "^5.5.0",
     "vitest": "^5.0.3"
   }

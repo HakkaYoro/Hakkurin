@@ -1,6 +1,4 @@
 import type { ChildProcess } from 'child_process';
-import { TrackStartedEvent } from './events/track-started.event';
-import { PlaybackStoppedEvent } from './events/playback-stopped.event';
 
 export type ItemType = 'youtube' | 'navidrome';
 
@@ -95,15 +93,6 @@ export class GuildMusicState {
   // crear ffmpeg/player sobre conexión muerta.
   epoch = 0;
 
-  private _domainEvents: (TrackStartedEvent | PlaybackStoppedEvent)[] = [];
-
-  /** El servicio de aplicación drena y publica tras el éxito de la operación. */
-  pullDomainEvents(): (TrackStartedEvent | PlaybackStoppedEvent)[] {
-    const events = this._domainEvents;
-    this._domainEvents = [];
-    return events;
-  }
-
   /** Ocupado = player en estado no-idle (Buffering/Playing; 'idle' es el literal
    *  de AudioPlayerStatus.Idle, comparado así para no importar el driver). */
   isBusy(): boolean {
@@ -182,8 +171,7 @@ export class GuildMusicState {
     this.currentCoverUrl = null;
   }
 
-  /** Track en reproducción: now-playing + evento de dominio (lo publica el
-   *  servicio de aplicación tras notificar al presenter). */
+  /** Track en reproducción: actualiza el now-playing. */
   startTrack(guildId: string, item: QueueItemVo, resolvedTitle?: string): void {
     if (item.type === 'navidrome') {
       const title = item.title ?? 'Navidrome Stream';
@@ -195,11 +183,5 @@ export class GuildMusicState {
       this.currentSong = resolvedTitle ?? item.title ?? 'YouTube';
       this.currentCoverUrl = null;
     }
-    this._domainEvents.push(new TrackStartedEvent(guildId, this.currentSong));
-  }
-
-  /** El player pasó a Idle: el track terminó (o fue saltado). */
-  trackEnded(guildId: string): void {
-    this._domainEvents.push(new PlaybackStoppedEvent(guildId));
   }
 }

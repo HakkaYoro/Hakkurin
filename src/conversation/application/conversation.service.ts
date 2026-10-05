@@ -5,10 +5,6 @@ import { nowSec } from '../../common/util';
 import { Session } from '../domain/entities/session.entity';
 import { ChannelContext } from '../domain/entities/channel-context.entity';
 
-// Tipos que consumidores externos referencian por nombre.
-export { Session } from '../domain/entities/session.entity';
-export { ChannelContext } from '../domain/entities/channel-context.entity';
-
 const SESSION_TIMEOUT_S = 5 * 60;
 
 @Injectable()

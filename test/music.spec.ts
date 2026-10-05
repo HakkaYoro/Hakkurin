@@ -1,6 +1,5 @@
 import { vi } from 'vitest';
 import { ChannelType } from 'discord.js';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MusicService } from '../src/music/application/music.service';
 import { QueueItemVo } from '../src/music/domain/music.domain';
 import { SidecarAdapter } from '../src/music/infrastructure/adapters/sidecar.adapter';
@@ -81,7 +80,7 @@ function makeFakeVoice(over: Record<string, any> = {}) {
 function makeService(catalog = makeCatalog(), voiceOver: Record<string, any> = {}) {
   const config = new MockConfig();
   const { voice, conns, players, lost } = makeFakeVoice(voiceOver);
-  const svc = new MusicService(config, catalog, new SidecarAdapter(config), new FfmpegAdapter(), new DiscordPresenterAdapter(), voice, new EventEmitter2());
+  const svc = new MusicService(config, catalog, new SidecarAdapter(config), new FfmpegAdapter(), new DiscordPresenterAdapter(), voice);
   const channel: any = { id: 'c1', type: ChannelType.GuildText, send: vi.fn(async () => {}) };
   const guild: any = { id: 'g1' };
   return { svc, catalog, voice, conns, players, lost, channel, guild };
