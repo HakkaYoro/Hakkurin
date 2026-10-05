@@ -25,15 +25,15 @@ el original queda en la rama `legacy-python`.
   ffmpeg → Opus 48k directo, `/stop` con epoch + abort + reset del sidecar y
   auto-actualización horaria de yt-dlp sin re-buildear imagen.
 - **WebUI** — dashboard server-rendered: config en vivo (secretos write-only), browse
-  de memorias y **Exportar Logs** (ring buffer en memoria, descarga `hakkurin.log`
-  protegida por el mismo AuthGuard HTTP Basic opt-in).
+  y borrado de memorias y **Exportar Logs** (ring buffer en memoria, descarga
+  `hakkurin.log` protegida por el mismo AuthGuard HTTP Basic opt-in).
 - **Loops de fondo** — timeouts de sesión, cola de memoria, recovery de API,
   festividades, recordatorios y limpieza de canales de voz, con guard de reentrada.
 - **Arquitectura hexagonal + DDD** — cada feature se parte en `domain/` (entidades,
-  value objects, eventos y puertos como abstract classes), `application/` (use-cases
-  sin frameworks) e `infrastructure/` (adaptadores de Discord, voz, ffmpeg, sidecar y
-  disco); los eventos de dominio viajan por `@nestjs/event-emitter` y se publican solo
-  tras persistir.
+  value objects y puertos como abstract classes), `application/` (use-cases sin
+  frameworks) e `infrastructure/` (adaptadores de Discord, voz, ffmpeg, sidecar y
+  disco); la auto-memoria reacciona al evento de dominio `InteractionAnswered` vía
+  `@nestjs/event-emitter`.
 
 ## Stack
 
@@ -88,7 +88,7 @@ privados por defecto — hazlo público o autentica el NAS.
 
 ```bash
 npm install
-npm test            # vitest (217 specs)
+npm test            # vitest
 npx tsc --noEmit    # typecheck (no hay script lint)
 npm run build       # nest build → dist/ (templates vía nest-cli assets)
 npm run start:dev   # watch; requiere sidecar aparte para música YT (http://localhost:7654)
@@ -114,19 +114,19 @@ src/
   conversation/  entidades Session/ChannelContext, historial de canales
   discord/       gateway + loops de fondo (DiscordAdapter, implementa
                  MessageTransportPort + BotStatePort + BotLifecycle);
-                 use-cases puros (respuesta, recordatorios, festividades, DMs)
+                 use-cases puros (respuesta, recordatorios, festividades, DMs,
+                 parser de acciones programadas)
   music/         GuildMusicState + QueueItemVo; puertos de voz/audio/stream;
                  adaptadores @discordjs/voice, ffmpeg, sidecar yt-dlp, presenter
   navidrome/     SongVo + NavidromeAdapter (cliente Subsonic, CatalogPort)
-  scheduler/     parser de recordatorios embebidos en auto-memoria
   web/           WebUI nunjucks, AuthGuard, LogTee (export de logs)
 sidecar/         FastAPI + yt-dlp: /extract, /version, /update, /reset
 test/            specs de vitest, un archivo por módulo (cwd tmp aislado)
 ```
 
-Regla de nombrado: **un puerto, un `*.adapter.ts`** — los 15 puertos viven en
-`domain/ports/` como abstract classes y cada uno tiene su adaptador en
-`infrastructure/`:
+Regla de nombrado: **un puerto, un `*.adapter.ts`** — los puertos viven como abstract
+classes (casi todos en `domain/ports/`; `BotLifecycle` en `web/application/ports/`) y
+cada uno tiene su adaptador en `infrastructure/`:
 
 | Puerto (`domain/ports/`) | Adaptador (`infrastructure/`) |
 |---|---|
