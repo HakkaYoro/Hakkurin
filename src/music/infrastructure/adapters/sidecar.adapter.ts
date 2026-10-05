@@ -13,16 +13,9 @@ const CONN_ERR_CODES = ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND'];
 
 export class SidecarAdapter extends StreamSource {
   private readonly logger = new Logger(SidecarAdapter.name);
-  private readonly config: ConfigService;
 
-  constructor(config: ConfigService) {
-    // super() explícito: derivar de la abstract class exige super antes de this.
+  constructor(private readonly config: ConfigService) {
     super();
-    this.config = config;
-  }
-
-  private sidecarUrl(): string {
-    return this.config.sidecarUrl();
   }
 
   private extractSignal(external?: AbortSignal): AbortSignal {
@@ -33,13 +26,13 @@ export class SidecarAdapter extends StreamSource {
   /** Mata el proceso del sidecar (compose lo reinicia limpio). Fire-and-forget:
    *  lo llama /stop para garantizar yt-dlp fresco aunque un extract quede wedged. */
   override reset(): void {
-    void fetch(`${this.sidecarUrl()}/reset`, { method: 'POST', signal: AbortSignal.timeout(RESET_TIMEOUT_MS) })
+    void fetch(`${this.config.sidecarUrl()}/reset`, { method: 'POST', signal: AbortSignal.timeout(RESET_TIMEOUT_MS) })
       .catch(() => {});
   }
 
   async resolve(item: QueueItemVo, signal?: AbortSignal): Promise<{ streamUrl: string; title?: string }> {
     if (item.type === 'navidrome') return { streamUrl: item.url };
-    const url = `${this.sidecarUrl()}/extract?url=${encodeURIComponent(item.url)}`;
+    const url = `${this.config.sidecarUrl()}/extract?url=${encodeURIComponent(item.url)}`;
 
     let res: Response;
     // Reinicio reciente del sidecar (/stop ~2s) o self-kill del /update (restart
@@ -63,7 +56,7 @@ export class SidecarAdapter extends StreamSource {
         this.logger.warn(
           `Sidecar yt-dlp falló tras ${attempt + 1} intento(s) para ${item.url}: ${reason}` +
             (attempt > 0
-              ? ` — el bot está apuntando a ${this.sidecarUrl()}. ¿Es alcanzable? ¿Está corriendo el contenedor sidecar?`
+              ? ` — el bot está apuntando a ${this.config.sidecarUrl()}. ¿Es alcanzable? ¿Está corriendo el contenedor sidecar?`
               : ''),
         );
         return { streamUrl: '' };

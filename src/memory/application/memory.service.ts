@@ -39,14 +39,8 @@ export class MemoryService implements OnModuleInit {
   }
 
   async checkStaleBuffers(): Promise<string[]> {
-    const users: string[] = [];
     const now = Date.now() / 1000;
-    for (const user_id of await this.repo.listUserIds()) {
-      const mem = await this.getMemory(user_id);
-      const lastSum = mem.last_summary_time || 0;
-      if (mem.history_buffer.length > 0 && now - lastSum > STALE_BUFFER_SECONDS) users.push(user_id);
-    }
-    return users;
+    return this.usersWithBuffer((mem) => now - (mem.last_summary_time || 0) > STALE_BUFFER_SECONDS);
   }
 
   async getSelfMemory(): Promise<string> {
@@ -75,10 +69,14 @@ export class MemoryService implements OnModuleInit {
   }
 
   async getUsersWithPendingBuffer(): Promise<string[]> {
+    return this.usersWithBuffer(() => true);
+  }
+
+  private async usersWithBuffer(keep: (mem: UserMemory) => boolean): Promise<string[]> {
     const users: string[] = [];
     for (const user_id of await this.repo.listUserIds()) {
-      const { buffer } = await this.getBufferAndSummary(user_id);
-      if (buffer.length > 0) users.push(user_id);
+      const mem = await this.getMemory(user_id);
+      if (mem.history_buffer.length > 0 && keep(mem)) users.push(user_id);
     }
     return users;
   }

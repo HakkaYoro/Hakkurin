@@ -72,7 +72,9 @@ it('thumbnail roto pero oEmbed sano → texto presente, thumbnail null', async (
 });
 
 it('timeout del fetch → contexto vacío (no cuelga el pipeline)', async () => {
-  const fetchImpl = vi.fn((..._args: any[]) => new Promise(() => {}) as any); // nunca resuelve
+  // Stub fiel al contrato de fetch: el abort de la señal rechaza la promesa.
+  const fetchImpl = vi.fn((_url: string, opts: any) =>
+    new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(opts.signal.reason))) as any);
   const ctx = await getUrlContext('https://example.com/lento', { fetchImpl, timeoutMs: 20 });
   expect(ctx.text).toBeNull();
 });

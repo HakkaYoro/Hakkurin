@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { atomicWrite } from '../../../common/util';
 import { CryptoAdapter } from './crypto.adapter';
 import { MemoryRepositoryPort } from '../../domain/ports/memory.ports';
 
@@ -15,7 +16,6 @@ export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
   private readonly logger = new Logger(MemoryRepositoryAdapter.name);
 
   constructor(private readonly crypto: CryptoAdapter) {
-    // super() explícito: derivar de la abstract class exige super antes de this.
     super();
   }
 
@@ -47,7 +47,7 @@ export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
     const filePath = this.filePath(user_id);
     try {
       const json = JSON.stringify(memoryData);
-      await this.atomicWriteBytes(filePath, this.crypto.encrypt(json));
+      await atomicWrite(filePath, this.crypto.encrypt(json));
     } catch (e: any) {
       this.logger.error(`Error guardando memoria de ${user_id}: ${e.message}`);
     }
@@ -56,7 +56,7 @@ export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
   async saveSummaryPlaintext(user_id: string, summaryText: string): Promise<void> {
     const filePath = path.join(SUMMARY_DIR, `${user_id}.txt`);
     try {
-      await this.atomicWriteText(filePath, summaryText ?? '');
+      await atomicWrite(filePath, summaryText ?? '');
     } catch (e: any) {
       this.logger.warn(`Error guardando resumen plano de ${user_id}: ${e.message}`);
     }
@@ -65,12 +65,13 @@ export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
   /** Lista [{user_id, date}] por mtime desc; is_self lo marca MemoryService. */
   async listMemories(): Promise<{ user_id: string; date: string }[]> {
     const out: { user_id: string; date: string }[] = [];
-    const pad = (n: number) => String(n).padStart(2, '0');
     for (const filename of await this.listEncFiles()) {
       try {
-        const d = new Date((await fs.stat(path.join(MEMORY_DIR, filename))).mtimeMs);
-        const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-        out.push({ user_id: filename.replace(/\.enc$/, ''), date });
+        const stat = await fs.stat(path.join(MEMORY_DIR, filename));
+        out.push({
+          user_id: filename.replace(/\.enc$/, ''),
+          date: new Date(stat.mtimeMs).toLocaleString('sv-SE'),
+        });
       } catch {
         /* archivo desaparecido entre readdir y stat */
       }
@@ -129,17 +130,5 @@ export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
 
   private sanitizeUserId(user_id: any): string {
     return String(user_id).trim();
-  }
-
-  private async atomicWriteBytes(filePath: string, data: Buffer): Promise<void> {
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, data);
-    await fs.rename(tmp, filePath);
-  }
-
-  private async atomicWriteText(filePath: string, content: string): Promise<void> {
-    const tmp = `${filePath}.tmp`;
-    await fs.writeFile(tmp, content, 'utf-8');
-    await fs.rename(tmp, filePath);
   }
 }

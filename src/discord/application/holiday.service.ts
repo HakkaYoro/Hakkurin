@@ -1,5 +1,5 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
-import { delay } from '../../common/util';
+import { delay, gmt4Date } from '../../common/util';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { MemoryService } from '../../memory/application/memory.service';
 import { HolidayStorePort } from '../domain/ports/json-store.port';
@@ -18,8 +18,7 @@ export class HolidayService {
   ) {}
 
   async checkHolidays(): Promise<void> {
-    // Wall clock GMT-4: desplazar epoch -4h y leer campos UTC.
-    const now = new Date(Date.now() - 4 * 3600 * 1000);
+    const now = gmt4Date(new Date());
     const month = now.getUTCMonth() + 1;
     const day = now.getUTCDate();
     const hour = now.getUTCHours();

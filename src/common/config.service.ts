@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { atomicWrite } from './util';
 
 export const CONFIG_FILE = 'data/config.json';
 
@@ -67,9 +68,7 @@ export class ConfigService {
 
   async save(): Promise<void> {
     await fs.mkdir(path.dirname(CONFIG_FILE), { recursive: true });
-    const tmp = `${CONFIG_FILE}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(this.config, null, 4), 'utf-8');
-    await fs.rename(tmp, CONFIG_FILE); // atómico
+    await atomicWrite(CONFIG_FILE, JSON.stringify(this.config, null, 4));
   }
 
   get<T = any>(key: string, defaultValue: T = undefined as any): T {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { atomicWrite } from '../../../common/util';
 import { MemoryQueuePort } from '../../domain/ports/memory.ports';
 
 export const QUEUE_FILE = 'data/memory/queue.json';
@@ -32,11 +33,6 @@ export class MemoryQueueAdapter extends MemoryQueuePort {
   // (dos escrituras concurrentes podrían clobber el JSON). Nada de la cola
   // puede llamarse dentro de la sección exclusiva (promote incluido): deadlock.
   private tail: Promise<unknown> = Promise.resolve();
-
-  constructor() {
-    // super() explícito: derivar de la abstract class exige super antes de this.
-    super();
-  }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.tail.then(fn, fn);
@@ -70,9 +66,7 @@ export class MemoryQueueAdapter extends MemoryQueuePort {
       const s = normalizeQueueItem(item);
       if (s) safe.push(s);
     }
-    const tmp = `${QUEUE_FILE}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(safe, null, 2), 'utf-8');
-    await fs.rename(tmp, QUEUE_FILE);
+    await atomicWrite(QUEUE_FILE, JSON.stringify(safe, null, 2));
   }
 
   async addToQueue(user_id: string, text: any): Promise<void> {

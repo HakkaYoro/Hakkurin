@@ -1,6 +1,7 @@
 // Las acciones programadas viven embebidas en el texto libre de la auto-memoria:
 // un array JSON dentro de fences ```json``` (o suelto, formato libre de Gemma).
 import { Injectable } from '@nestjs/common';
+import { balancedSlice } from '../../common/util';
 
 const DUE_WINDOW_S = 600;
 const FENCED_RE = /```json\s*(\[.*?\])\s*```/gis;
@@ -44,30 +45,9 @@ export class ActionParserService {
     let m: RegExpExecArray | null;
     while ((m = FENCED_RE.exec(memoryText)) !== null) candidates.push(m[1]);
 
-    const starts: number[] = [];
-    for (let i = 0; i < memoryText.length; i++) if (memoryText[i] === '[') starts.push(i);
-    for (const start of starts) {
-      let depth = 0;
-      let inString = false;
-      let escaped = false;
-      for (let idx = start; idx < memoryText.length; idx++) {
-        const ch = memoryText[idx];
-        if (inString) {
-          if (escaped) escaped = false;
-          else if (ch === '\\') escaped = true;
-          else if (ch === '"') inString = false;
-          continue;
-        }
-        if (ch === '"') inString = true;
-        else if (ch === '[') depth++;
-        else if (ch === ']') {
-          depth--;
-          if (depth === 0) {
-            candidates.push(memoryText.slice(start, idx + 1));
-            break;
-          }
-        }
-      }
+    for (let i = memoryText.indexOf('['); i !== -1; i = memoryText.indexOf('[', i + 1)) {
+      const block = balancedSlice(memoryText, '[', ']', i);
+      if (block) candidates.push(block);
     }
     return candidates;
   }

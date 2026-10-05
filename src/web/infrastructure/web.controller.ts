@@ -44,20 +44,18 @@ export class WebController {
   @Post('update_config')
   @Redirect('/?saved=true', 303)
   async updateConfig(@Body() body: any): Promise<void> {
-    if (body.bot_name != null) await this.config.set('bot_name', String(body.bot_name));
-    if (body.system_prompt != null) await this.config.set('system_prompt', String(body.system_prompt));
-    if (body.reply_probability != null) {
-      const v = parseFloat(body.reply_probability);
-      if (!isNaN(v)) await this.config.set('reply_probability', v);
+    // Estos tres admiten vacío (borran el valor); el resto solo si viene rellenado.
+    for (const key of ['bot_name', 'system_prompt', 'developer_id']) {
+      if (body[key] != null) await this.config.set(key, String(body[key]));
     }
-    if (body.developer_id != null) await this.config.set('developer_id', String(body.developer_id));
-    await this.setIf(body, 'navidrome_base_url');
-    await this.setIf(body, 'navidrome_external_url');
-    await this.setIf(body, 'navidrome_username');
-    await this.setIf(body, 'ytdl_sidecar_url');
-    // Write-only secrets: solo sobrescribir si el campo viene rellenado.
-    await this.setIf(body, 'bot_token');
-    await this.setIf(body, 'navidrome_password');
+    for (const key of [
+      'navidrome_base_url', 'navidrome_external_url', 'navidrome_username', 'ytdl_sidecar_url',
+      'bot_token', 'navidrome_password', // write-only secrets: solo sobrescribir si vienen rellenados
+    ]) {
+      if (typeof body[key] === 'string' && body[key].trim()) await this.config.set(key, body[key].trim());
+    }
+    const prob = parseFloat(body.reply_probability);
+    if (!isNaN(prob)) await this.config.set('reply_probability', prob);
     let keysChanged = false;
     if (typeof body.gemini_keys === 'string' && body.gemini_keys.trim()) {
       const keys = body.gemini_keys.split('\n').map((k: string) => k.trim()).filter(Boolean);
@@ -116,10 +114,5 @@ export class WebController {
   @Redirect('/memories?deleted=single', 303)
   async deleteMemory(@Param('user_id') userId: string): Promise<void> {
     await this.memory.deleteMemory(userId);
-  }
-
-  private async setIf(body: any, key: string): Promise<void> {
-    const val = body[key];
-    if (typeof val === 'string' && val.trim()) await this.config.set(key, val.trim());
   }
 }

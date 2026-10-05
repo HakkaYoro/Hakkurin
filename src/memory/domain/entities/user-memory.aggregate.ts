@@ -86,12 +86,6 @@ export function normalizeMemorySchema(raw: any): UserMemory {
 const SUMMARY_TRIGGER_SECONDS = 1800;
 const SUMMARY_TRIGGER_INTERACTIONS = 20;
 
-function arraysEqual(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
 export class UserMemoryAggregate {
   private constructor(
     private readonly mem: UserMemory,
@@ -134,7 +128,7 @@ export class UserMemoryAggregate {
       this.mem.history_buffer = [];
     } else {
       const processed = processedInteractions.map(String);
-      if (processed.length > 0 && arraysEqual(currentBuffer.slice(0, processed.length), processed)) {
+      if (processed.length > 0 && processed.every((v, i) => currentBuffer[i] === v)) {
         this.mem.history_buffer = currentBuffer.slice(processed.length);
       }
     }

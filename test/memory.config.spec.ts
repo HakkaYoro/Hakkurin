@@ -1,6 +1,7 @@
 import { promises as fsPromises } from 'fs';
 import * as path from 'path';
 import { ConfigService } from '../src/common/config.service';
+import { atomicWrite } from '../src/common/util';
 import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
 import { MemoryQueueAdapter } from '../src/memory/infrastructure/persistence/memory-queue.adapter';
@@ -75,7 +76,7 @@ describe('MemoryService', () => {
       interaction_count: 'cinco',
       last_channel_id: '123abc',
     };
-    await (repo as any).atomicWriteBytes((repo as any).filePath('2'), cryptoSvc.encrypt(JSON.stringify(bad)));
+    await atomicWrite((repo as any).filePath('2'), cryptoSvc.encrypt(JSON.stringify(bad)));
     const m = await mem.getMemory('2');
     expect(m.profile.personality_traits).toEqual([]);
     expect(m.profile.likes).toEqual(['1', '2', 'x']);

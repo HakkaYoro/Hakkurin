@@ -1,10 +1,7 @@
+import { gmt4Date } from '../../common/util';
+
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);
-}
-
-// GMT-4 fijo (sin DST): desplaza y lee con getters UTC para no depender del TZ del host.
-export function gmt4Date(d: Date): Date {
-  return new Date(d.getTime() + -4 * 60 * 60_000);
 }
 
 export function formatGmt4(d: Date): string {

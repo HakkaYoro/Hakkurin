@@ -25,24 +25,19 @@ export async function getUrlContext(
   if (yt) {
     const videoId = yt[1];
     try {
-      const res = await withTimeout(
-        fetchImpl(
-          `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
-          { headers: { 'User-Agent': UA } },
-        ),
-        timeoutMs,
+      const res = await fetchImpl(
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+        { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) },
       );
       if (res.ok) {
         const info: any = await res.json();
         const text = `Título del video de YouTube: ${info.title ?? 'Video'}\nCanal/Autor: ${info.author_name ?? 'Desconocido'}`;
         let thumb: Buffer | null = null;
         try {
-          const tRes = await withTimeout(
-            fetchImpl(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, {
-              headers: { 'User-Agent': UA },
-            }),
-            timeoutMs,
-          );
+          const tRes = await fetchImpl(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, {
+            headers: { 'User-Agent': UA },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
           if (tRes.ok) thumb = Buffer.from(await tRes.arrayBuffer());
         } catch {
         }
@@ -54,7 +49,7 @@ export async function getUrlContext(
 
   // Fallback HTML: posible bot-protection; sin contexto.
   try {
-    const res = await withTimeout(fetchImpl(url, { headers: { 'User-Agent': UA } }), timeoutMs);
+    const res = await fetchImpl(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return empty;
     const html = await res.text();
     const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim();
@@ -67,13 +62,6 @@ export async function getUrlContext(
   } catch {
   }
   return empty;
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
-  ]);
 }
 
 @Injectable()
