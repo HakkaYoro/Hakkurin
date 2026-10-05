@@ -6,15 +6,14 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# ---- runtime: sólo deps de producción + ffmpeg (PCM para @discordjs/voice) ----
-# ponytail: libsodium-wrappers (WASM) + opusscript (JS puro) — sin compilación
-# nativa, funciona en node:22-slim sin build-essential. Upgrade path: si el
-# rendimiento importa, cambiar a sodium-native + @discordjs/opus (requiere
-# build-essential y python3 en ambos stages o copiar node_modules del build).
+# ---- runtime: sólo deps de producción + ffmpeg estático ----
+# ponytail: ffmpeg estático de mwader/static-ffmpeg (~80MB) en vez del apt
+# (~466MB de libs compartidas): misma decodificación https/webm-opus/m4a/mp3/flac
+# y encoder libopus que usa ffmpeg.adapter.ts. Si algún día falta un codec
+# exótico, upgrade path: volver a `apt-get install ffmpeg`.
 FROM node:22-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=mwader/static-ffmpeg:7.1 /ffmpeg /usr/local/bin/ffmpeg
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
