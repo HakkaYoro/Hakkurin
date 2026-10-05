@@ -10,7 +10,7 @@ import { MusicUiService } from './infrastructure/music-ui.service';
 import { UrlEnricherAdapter } from './infrastructure/url-enricher.adapter';
 import { HolidayStoreAdapter } from './infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from './infrastructure/persistence/sleep-store.adapter';
-import { ActionParserService } from '../scheduler/application/action-parser.service';
+import { ActionParserService } from './application/action-parser.service';
 import { ConversationModule } from '../conversation/conversation.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AiModule } from '../ai/ai.module';

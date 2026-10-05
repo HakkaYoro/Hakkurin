@@ -1,4 +1,4 @@
-import { ActionParserService } from '../src/scheduler/application/action-parser.service';
+import { ActionParserService } from '../src/discord/application/action-parser.service';
 
 // Parsea un array JSON (fenced o balanceado suelto) dentro del texto libre de la
 // auto-memoria, filtra la ventana "due" de 10min y reescribe el bloque sin las

@@ -8,7 +8,7 @@ import { HolidayService } from '../src/discord/application/holiday.service';
 import { ConversationService } from '../src/conversation/application/conversation.service';
 import { StealthDmService } from '../src/discord/application/stealth-dm.service';
 import { SleepService } from '../src/discord/application/sleep.service';
-import { ActionParserService } from '../src/scheduler/application/action-parser.service';
+import { ActionParserService } from '../src/discord/application/action-parser.service';
 import { ConfigService } from '../src/common/config.service';
 import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';

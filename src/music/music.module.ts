@@ -22,6 +22,6 @@ import { VoiceConnectionPort } from './domain/ports/voice-connection.port';
     { provide: CatalogPort, useExisting: NavidromeAdapter },
     MusicService, YtdlUpdaterService,
   ],
-  exports: [MusicService],
+  exports: [MusicService, CatalogPort],
 })
 export class MusicModule {}

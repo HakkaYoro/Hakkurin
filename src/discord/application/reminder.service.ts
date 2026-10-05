@@ -2,7 +2,7 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';
-import { ActionParserService, type ScheduledAction } from '../../scheduler/application/action-parser.service';
+import { ActionParserService, type ScheduledAction } from './action-parser.service';
 import { MessageTransportPort } from '../domain/ports/message-transport.port';
 
 @Injectable()

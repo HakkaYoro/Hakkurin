@@ -19,7 +19,7 @@ import { StealthDmService } from '../application/stealth-dm.service';
 import { SleepService } from '../application/sleep.service';
 import { SlashCommandsService } from './slash-commands.service';
 import { MusicService } from '../../music/application/music.service';
-import { ActionParserService } from '../../scheduler/application/action-parser.service';
+import { ActionParserService } from '../application/action-parser.service';
 import { delay, sleepMs } from '../../common/util';
 import { ABORTED, SmartResponseService } from '../application/smart-response.service';
 import { ReminderService } from '../application/reminder.service';

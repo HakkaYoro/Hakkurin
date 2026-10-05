@@ -9,9 +9,10 @@ import {
   type MessageComponentInteraction,
 } from 'discord.js';
 import { MusicService, type QueueItemVo } from '../../music/application/music.service';
-import { NavidromeAdapter } from '../../navidrome/infrastructure/navidrome.adapter';
+import { CatalogPort } from '../../music/domain/ports/catalog.port';
 import { AlbumVo, ArtistVo, SongVo } from '../../navidrome/domain/song.vo';
 import { toArray } from '../../common/util';
+import { Inject } from '@nestjs/common';
 
 interface SearchSnapshot {
   songs: SongVo[];
@@ -26,12 +27,12 @@ export class MusicUiService {
 
   constructor(
     private readonly music: MusicService,
-    private readonly navidrome: NavidromeAdapter,
+    @Inject(CatalogPort) private readonly catalog: CatalogPort,
   ) {}
 
   async handleSearch(i: ChatInputCommandInteraction, query: string, isRadio: boolean): Promise<void> {
     await i.deferReply().catch(() => {});
-    const results = await this.navidrome.search(query, 5);
+    const results = await this.catalog.search(query, 5);
     const songs = toArray(results.song).slice(0, 5);
     const albums = toArray(results.album).slice(0, 5);
     const artists = toArray(results.artist).slice(0, 5);
@@ -69,7 +70,7 @@ export class MusicUiService {
       .setColor(0x3498db)
       .setFooter({ text: 'Hakkurei Music' })
       .setDescription(lines.length ? lines.join('\n') : 'No se encontraron resultados.');
-    const thumb = this.navidrome.getCoverUrl(songs[0]?.coverArt ?? undefined) ?? this.navidrome.getCoverUrl(albums[0]?.coverArt ?? undefined);
+    const thumb = this.catalog.getCoverUrl(songs[0]?.coverArt ?? undefined) ?? this.catalog.getCoverUrl(albums[0]?.coverArt ?? undefined);
     if (thumb) embed.setThumbnail(thumb);
     return embed;
   }
@@ -104,10 +105,10 @@ export class MusicUiService {
       if (song) items = [this.music.songToItem(song)];
     } else if (kind === 'album') {
       const album = snap.albums[idx];
-      if (album) items = (await this.navidrome.getAlbumSongs(album.id)).map((s) => this.music.songToItem(s));
+      if (album) items = (await this.catalog.getAlbumSongs(album.id)).map((s) => this.music.songToItem(s));
     } else if (kind === 'artist') {
       const artist = snap.artists[idx];
-      if (artist) items = (await this.navidrome.getArtistRadio(artist.name ?? '', 20)).map((s) => this.music.songToItem(s));
+      if (artist) items = (await this.catalog.getArtistRadio(artist.name ?? '', 20)).map((s) => this.music.songToItem(s));
     }
 
     if (snap.isRadio && items.length) this.music.startRadioMode(guildId);
