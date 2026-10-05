@@ -1,13 +1,14 @@
 // Puerto de web/app.py. Dashboard + config + memories + restart, server-rendered.
 // Fix de seguridad vs el original: secretos write-only (no se hace echo de
 // bot_token/gemini_keys/navidrome_password al DOM) y auth guard opt-in.
-import { Body, Controller, Get, Inject, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Inject, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
 import { ConfigService } from '../common/config.service';
 import { BOT_SELF_ID, MemoryService } from '../memory/memory.service';
 import { BOT_LIFECYCLE, type BotLifecycle } from './bot-lifecycle.port';
 import type { AiBrain } from '../ai/ai-brain.interface';
 import { ViewService } from './view.service';
 import { AuthGuard } from './auth.guard';
+import { LogTeeService } from './log-tee.service';
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -20,6 +21,7 @@ export class WebController {
     @Inject(BOT_LIFECYCLE) private readonly discord: BotLifecycle,
     @Inject('AiBrain') private readonly brain: AiBrain,
     private readonly view: ViewService,
+    private readonly logTee: LogTeeService,
   ) {}
 
   @Get()
@@ -73,6 +75,16 @@ export class WebController {
         this.logger.warn(`reload Gemini tras update_config: ${(e as Error).message}`);
       }
     }
+  }
+
+  // Descarga del ring buffer de logs en memoria (LogTeeService, registrado como
+  // logger global en main.ts). Protegida por el AuthGuard de clase. El código
+  // jamás loguea secrets/stream_urls, así que el dump es seguro por diseño.
+  @Get('logs')
+  @Header('Content-Type', 'text/plain; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="hakkurin.log"')
+  logs(): string {
+    return this.logTee.text();
   }
 
   @Post('restart')

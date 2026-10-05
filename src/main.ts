@@ -4,6 +4,7 @@ import { setDefaultResultOrder } from 'node:dns';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { LogTeeService } from './web/log-tee.service';
 
 async function bootstrap() {
   // Force IPv4 a nivel socket (porteo del source_address '0.0.0.0' del Python legacy,
@@ -17,16 +18,19 @@ async function bootstrap() {
   setDefaultResultOrder('ipv4first');
 
   const app = await NestFactory.create(AppModule);
+  // Tee de logs: todo lo que Nest imprime queda además en un ring buffer en
+  // memoria para la descarga GET /logs de la WebUI (stdout del contenedor no).
+  const logTee = app.get(LogTeeService);
+  app.useLogger(logTee);
 
   // Diagnóstico de stutter: el pacer de 20ms de voz de @discordjs/voice vive en
   // este event-loop; si se bloquea (sync pesado, GC), Discord recibe silencio
   // aunque el buffer de audio esté lleno. Log de percentiles cada 30s para
-  // correlacionar con micro-cortes. ponytail: console.log directo, sin DI.
+  // correlacionar con micro-cortes.
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable();
   setInterval(() => {
-    // eslint-disable-next-line no-console
-    console.log(
+    logTee.log(
       `[eventloop] p50=${loop.percentile(50).toFixed(1)}ms ` +
         `p99=${loop.percentile(99).toFixed(1)}ms ` +
         `p99.9=${loop.percentile(99.9).toFixed(1)}ms`,

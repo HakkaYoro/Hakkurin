@@ -11,6 +11,11 @@
             🧠 Ver Memorias de Usuarios
         </button>
     </a>
+    <a href="/logs" style="text-decoration: none;">
+        <button type="button" style="background: linear-gradient(45deg, #bd93f9, #ff79c6); color: #282a36;">
+            📜 Exportar Logs
+        </button>
+    </a>
 </div>
 
 <div class="card">
@@ -67,7 +72,7 @@
             <label for="ytdl_sidecar_url">URL del sidecar yt-dlp (extracción de YouTube)</label>
             <input type="text" id="ytdl_sidecar_url" name="ytdl_sidecar_url" value="{{ ytdl_sidecar_url }}"
                 placeholder="http://sidecar:7654 (compose) · http://localhost:7654 (local)">
-            <div class="hint">Dónde corre el contenedor yt-dlp. Vacío = http://localhost:7654 (default).</div>
+            <div class="hint">En compose lo fija la env YTDL_SIDECAR_URL (este campo se ignora). Local: http://localhost:7654.</div>
         </div>
 
         <div class="form-group">

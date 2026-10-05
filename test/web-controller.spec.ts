@@ -29,8 +29,9 @@ function makeController() {
   const discord = { forceShutdownAndSummarize: vi.fn(async () => {}), restart: vi.fn(async () => {}) } as any;
   const brain = { reloadConfig: vi.fn(async () => {}) } as any;
   const view = { render: vi.fn(async () => '<html>ok</html>') } as any;
-  const ctl = new WebController(config, memory, discord, brain, view);
-  return { ctl, config, memory, discord, brain, view };
+  const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarClient] falló') } as any;
+  const ctl = new WebController(config, memory, discord, brain, view, logTee);
+  return { ctl, config, memory, discord, brain, view, logTee };
 }
 
 describe('WebController — root', () => {
@@ -89,6 +90,14 @@ describe('WebController — restart', () => {
     ctl.restart();
     await new Promise((r) => setTimeout(r, 10));
     expect(discord.restart).not.toHaveBeenCalled();
+  });
+});
+
+describe('WebController — logs', () => {
+  it('GET /logs devuelve el contenido del LogTee (descarga plain-text)', () => {
+    const { ctl, logTee } = makeController();
+    expect(ctl.logs()).toBe(logTee.text());
+    expect(ctl.logs()).toContain('[SidecarClient]');
   });
 });
 
