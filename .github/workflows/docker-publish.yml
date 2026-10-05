@@ -52,3 +52,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # El sidecar yt-dlp (contexto ./sidecar) también se publica: el NAS despliega
+      # con imágenes de GHCR (no buildea local), sin este push no existe el
+      # contenedor `sidecar` y el bot resuelve ENOTFOUND.
+      - name: Build and push sidecar image (yt-dlp)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./sidecar
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sidecar:latest
+          cache-from: type=gha,scope=sidecar
+          cache-to: type=gha,mode=max,scope=sidecar

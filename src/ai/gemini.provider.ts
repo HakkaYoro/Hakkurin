@@ -230,10 +230,15 @@ export class GeminiProvider implements AiBrain, OnModuleInit {
 
           let text = (response.text ?? '').trim();
           if (!text) {
+            // Gemma a veces devuelve texto vacío (visto con 31b-it en el resumen
+            // horario). Tratarlo como fallo → 2º intento del modelo y luego el
+            // siguiente del ladder; antes se retornaba '' en silencio.
             this.logger.warn(`RESPUESTA VACÍA con ${modelName}.`);
             try {
               this.logger.debug(`finish_reason: ${response.candidates?.[0]?.finishReason}`);
             } catch {}
+            lastError = new Error('respuesta vacía');
+            continue;
           }
 
           // Éxito con fallback sin estar forzado → activar modo fallback 40 min.

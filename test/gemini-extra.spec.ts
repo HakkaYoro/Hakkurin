@@ -92,6 +92,20 @@ describe('GeminiProvider — generateResponse', () => {
     const p2 = makeProvider(bad);
     await expect(p2.generateResponse('haz algo')).resolves.toBeNull();
   });
+
+  it('respuesta vacía del primario → 2º intento del mismo modelo y luego el siguiente del ladder', async () => {
+    // Gemma 31b-it devolvía '' en el resumen horario y se aceptaba en silencio.
+    const generateContent = vi.fn()
+      .mockResolvedValueOnce({ text: '' })
+      .mockResolvedValueOnce({ text: '' }) // mismo modelo, reintento
+      .mockResolvedValue({ text: 'respuesta buena' });
+    const p = makeProvider(generateContent);
+    await expect(p.generateResponse('x')).resolves.toBe('respuesta buena');
+    const models = generateContent.mock.calls.map((c: any[]) => c[0].model);
+    expect(generateContent.mock.calls).toHaveLength(3);
+    expect(models[0]).toBe(models[1]); // 2 intentos del mismo primario
+    expect(models[2]).not.toBe(models[0]); // el ladder siguió con otro modelo
+  });
 });
 
 describe('GeminiProvider — modo fallback persistente', () => {
