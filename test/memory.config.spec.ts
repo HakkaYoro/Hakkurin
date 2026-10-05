@@ -1,3 +1,5 @@
+import { promises as fsPromises } from 'fs';
+import * as path from 'path';
 import { ConfigService } from '../src/common/config.service';
 import { CryptoService } from '../src/memory/crypto.service';
 import { MemoryService, BOT_SELF_ID } from '../src/memory/memory.service';
@@ -86,10 +88,8 @@ describe('MemoryService', () => {
     expect(await mem.getQueuedInteractions('3')).toEqual(['dup']);
 
     // forzamos timestamp viejo escribiendo la cola a mano
-    const fs = require('fs').promises;
-    const path = require('path');
-    await fs.mkdir(path.dirname('data/memory/queue.json'), { recursive: true });
-    await fs.writeFile('data/memory/queue.json', JSON.stringify([{ user_id: '3', text: 'viejo', timestamp: 0 }]));
+    await fsPromises.mkdir(path.dirname('data/memory/queue.json'), { recursive: true });
+    await fsPromises.writeFile('data/memory/queue.json', JSON.stringify([{ user_id: '3', text: 'viejo', timestamp: 0 }]));
 
     const promoted = await mem.processQueue();
     expect(promoted).toEqual(['3']); // >300s → promovido y trigger

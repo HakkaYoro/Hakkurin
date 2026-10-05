@@ -17,6 +17,7 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"],
     "paths": {
       "@/*": ["src/*"]
     }

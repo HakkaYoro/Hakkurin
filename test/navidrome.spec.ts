@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { NavidromeService } from '../src/navidrome/navidrome.service';
 import { ConfigService } from '../src/common/config.service';
 import { createHash } from 'crypto';
@@ -69,7 +70,7 @@ describe('NavidromeService — auth MD5-salt + URLs', () => {
 
 describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
   it('search devuelve searchResult3 crudo', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({
+    const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ 'subsonic-response': { searchResult3: { song: [{ id: 's1', title: 'T' }] } } }),
     });
@@ -81,7 +82,7 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
   });
 
   it('getRandomSongs devuelve la lista randomSongs.song', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({
+    const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ 'subsonic-response': { randomSongs: { song: [{ id: 'a' }, { id: 'b' }] } } }),
     });
@@ -92,7 +93,7 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
   });
 
   it('getSimilarSongs sin ids → cae a getRandomSongs', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({
+    const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ 'subsonic-response': { randomSongs: { song: [{ id: 'r1' }] } } }),
     });
@@ -105,7 +106,7 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
   });
 
   it('getAlbumSongs devuelve album.song', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue({
+    const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ 'subsonic-response': { album: { song: [{ id: 'x' }] } } }),
     });
@@ -116,7 +117,7 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
   });
 
   it('respuesta de error de red → null/[] sin lanzar', async () => {
-    const fetchImpl = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
     const { svc, restore } = makeService(fetchImpl);
     await expect(svc.search('x')).resolves.toEqual({});
     await expect(svc.getRandomSongs(5)).resolves.toEqual([]);
