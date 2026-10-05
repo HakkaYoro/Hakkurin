@@ -1,5 +1,5 @@
 // Snapshots por messageId: discord.js no acopla datos al custom_id del botón.
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -12,7 +12,6 @@ import { MusicService, type QueueItemVo } from '../../music/application/music.se
 import { CatalogPort } from '../../music/domain/ports/catalog.port';
 import { AlbumVo, ArtistVo, SongVo } from '../../navidrome/domain/song.vo';
 import { toArray } from '../../common/util';
-import { Inject } from '@nestjs/common';
 
 interface SearchSnapshot {
   songs: SongVo[];
