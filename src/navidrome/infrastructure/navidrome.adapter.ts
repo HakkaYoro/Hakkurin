@@ -13,8 +13,8 @@ const songs = (raw: unknown): SongVo[] =>
   toArray(raw).map((r) => SongVo.from(r)).filter((s): s is SongVo => s !== null);
 
 @Injectable()
-export class NavidromeService extends CatalogPort {
-  private readonly logger = new Logger(NavidromeService.name);
+export class NavidromeAdapter extends CatalogPort {
+  private readonly logger = new Logger(NavidromeAdapter.name);
 
   constructor(private readonly config: ConfigService) {
     super();

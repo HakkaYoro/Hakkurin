@@ -2,15 +2,15 @@ import { promises as fsPromises } from 'fs';
 import * as path from 'path';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
-import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
-import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
+import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
+import { MemoryQueueAdapter } from '../src/memory/infrastructure/persistence/memory-queue.adapter';
 import { MemoryService, BOT_SELF_ID } from '../src/memory/application/memory.service';
 
-describe('CryptoService', () => {
-  let c: CryptoService;
+describe('CryptoAdapter', () => {
+  let c: CryptoAdapter;
   beforeEach(async () => {
-    c = new CryptoService();
+    c = new CryptoAdapter();
     await (c as any).onModuleInit();
   });
 
@@ -43,12 +43,12 @@ describe('ConfigService', () => {
 
 describe('MemoryService', () => {
   let mem: MemoryService;
-  let cryptoSvc: CryptoService;
-  let repo: MemoryRepository;
+  let cryptoSvc: CryptoAdapter;
+  let repo: MemoryRepositoryAdapter;
   beforeEach(async () => {
-    cryptoSvc = new CryptoService();
-    repo = new MemoryRepository(cryptoSvc);
-    mem = new MemoryService(cryptoSvc, repo, new MemoryQueue(), new EventEmitter2());
+    cryptoSvc = new CryptoAdapter();
+    repo = new MemoryRepositoryAdapter(cryptoSvc);
+    mem = new MemoryService(cryptoSvc, repo, new MemoryQueueAdapter(), new EventEmitter2());
     await cryptoSvc.onModuleInit();
     await mem.onModuleInit();
   });

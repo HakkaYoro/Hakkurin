@@ -2,7 +2,7 @@ import { EmbedBuilder } from 'discord.js';
 import type { ChannelHandle } from '../../domain/music.domain';
 import type { MusicPresenter } from '../../domain/ports/music.ports';
 
-export class DiscordPresenter implements MusicPresenter {
+export class DiscordPresenterAdapter implements MusicPresenter {
   async nowPlaying(channel: ChannelHandle, title: string, coverUrl: string | null): Promise<void> {
     if (!coverUrl) {
       await this.sendText(channel, `🎶 Reproduciendo ahora: **${title}**`);

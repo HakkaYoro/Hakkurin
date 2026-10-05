@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { CryptoService } from './crypto.service';
+import { CryptoAdapter } from './crypto.adapter';
 import { MemoryRepositoryPort } from '../../domain/ports/memory.ports';
 
 // Memorias .enc (AES-256-GCM) + espejo plano de resúmenes.
@@ -11,10 +11,10 @@ export const MEMORY_DIR = 'data/memory/users';
 export const SUMMARY_DIR = 'data/memory/summaries';
 
 @Injectable()
-export class MemoryRepository extends MemoryRepositoryPort {
-  private readonly logger = new Logger(MemoryRepository.name);
+export class MemoryRepositoryAdapter extends MemoryRepositoryPort {
+  private readonly logger = new Logger(MemoryRepositoryAdapter.name);
 
-  constructor(private readonly crypto: CryptoService) {
+  constructor(private readonly crypto: CryptoAdapter) {
     // super() explícito: derivar de la abstract class exige super antes de this.
     super();
   }

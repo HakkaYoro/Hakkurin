@@ -9,7 +9,7 @@ import {
   type MessageComponentInteraction,
 } from 'discord.js';
 import { MusicService, type QueueItemVo } from '../../music/application/music.service';
-import { NavidromeService } from '../../navidrome/infrastructure/navidrome.service';
+import { NavidromeAdapter } from '../../navidrome/infrastructure/navidrome.adapter';
 import { AlbumVo, ArtistVo, SongVo } from '../../navidrome/domain/song.vo';
 import { toArray } from '../../common/util';
 
@@ -26,7 +26,7 @@ export class MusicUiService {
 
   constructor(
     private readonly music: MusicService,
-    private readonly navidrome: NavidromeService,
+    private readonly navidrome: NavidromeAdapter,
   ) {}
 
   async handleSearch(i: ChatInputCommandInteraction, query: string, isRadio: boolean): Promise<void> {

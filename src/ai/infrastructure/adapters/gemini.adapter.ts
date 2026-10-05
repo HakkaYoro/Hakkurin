@@ -36,8 +36,8 @@ const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-3-flash-preview'];
 const FALLBACK_DURATION_S = 2400; // 40 min
 
 @Injectable()
-export class GeminiProvider implements AiBrain, OnModuleInit {
-  private readonly logger = new Logger(GeminiProvider.name);
+export class GeminiAdapter implements AiBrain, OnModuleInit {
+  private readonly logger = new Logger(GeminiAdapter.name);
   private keys: string[] = [];
   private currentKeyIndex = 0;
   private client: GoogleGenAI | null = null;

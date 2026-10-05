@@ -15,7 +15,7 @@ import { MessageTransportPort } from '../domain/ports/message-transport.port';
 import { UrlEnricherPort } from '../domain/ports/url-enricher.port';
 import { normalizeResponseContent } from '../../ai/infrastructure/mappers/response-normalize';
 
-/** Símbolo con el que sleepMs rechaza al abortar; DiscordService lo compara en su catch. */
+/** Símbolo con el que sleepMs rechaza al abortar; DiscordAdapter lo compara en su catch. */
 export const ABORTED = Symbol('aborted');
 
 const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;

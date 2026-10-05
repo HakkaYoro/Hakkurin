@@ -64,7 +64,7 @@ export class WebController {
       await this.config.set('gemini_keys', keys);
       keysChanged = true;
     }
-    // GeminiProvider cachea las keys: sólo reloadConfig() las repuebla en caliente.
+    // GeminiAdapter cachea las keys: sólo reloadConfig() las repuebla en caliente.
     if (keysChanged) {
       try {
         await this.brain.reloadConfig();

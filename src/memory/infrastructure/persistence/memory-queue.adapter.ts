@@ -27,7 +27,7 @@ function normalizeQueueItem(item: any): QueueItem | null {
 }
 
 @Injectable()
-export class MemoryQueue extends MemoryQueuePort {
+export class MemoryQueueAdapter extends MemoryQueuePort {
   // Mutex de promesa encadenada: serializa las secciones load→modify→save
   // (dos escrituras concurrentes podrían clobber el JSON). Nada de la cola
   // puede llamarse dentro de la sección exclusiva (promote incluido): deadlock.

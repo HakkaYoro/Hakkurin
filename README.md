@@ -107,21 +107,43 @@ eventos y **puertos** como abstract classes), `application/` (use-cases) e
 ```
 src/
   common/        ConfigService @Global (data/config.json atómico, sidecarUrl())
-  ai/            puerto AiBrain; provider Gemini (ladder, rotación de keys);
+  ai/            puerto AiBrain; GeminiAdapter (ladder, rotación de keys);
                  mapper zod de la salida del LLM
   memory/        agregado UserMemory, cifrado AES-256-GCM, cola con mutex,
                  listener de eventos para la auto-memoria
   conversation/  entidades Session/ChannelContext, historial de canales
-  discord/       MessageTransportPort; gateway + loops de fondo (DiscordService);
+  discord/       gateway + loops de fondo (DiscordAdapter, implementa
+                 MessageTransportPort + BotStatePort + BotLifecycle);
                  use-cases puros (respuesta, recordatorios, festividades, DMs)
   music/         GuildMusicState + QueueItemVo; puertos de voz/audio/stream;
                  adaptadores @discordjs/voice, ffmpeg, sidecar yt-dlp, presenter
-  navidrome/     SongVo + cliente Subsonic (implementa CatalogPort)
+  navidrome/     SongVo + NavidromeAdapter (cliente Subsonic, CatalogPort)
   scheduler/     parser de recordatorios embebidos en auto-memoria
   web/           WebUI nunjucks, AuthGuard, LogTee (export de logs)
 sidecar/         FastAPI + yt-dlp: /extract, /version, /update, /reset
 test/            specs de vitest, un archivo por módulo (cwd tmp aislado)
 ```
+
+Regla de nombrado: **un puerto, un `*.adapter.ts`** — los 15 puertos viven en
+`domain/ports/` como abstract classes y cada uno tiene su adaptador en
+`infrastructure/`:
+
+| Puerto (`domain/ports/`) | Adaptador (`infrastructure/`) |
+|---|---|
+| `AiBrain` | `GeminiAdapter` (Gemma + ladder) |
+| `EncryptorPort` · `MemoryRepositoryPort` · `MemoryQueuePort` | `CryptoAdapter` · `MemoryRepositoryAdapter` · `MemoryQueueAdapter` |
+| `MessageTransportPort` · `BotStatePort` · `BotLifecycle` | `DiscordAdapter` (gateway primario + loops) |
+| `HolidayStorePort` · `SleepStorePort` | `HolidayStoreAdapter` · `SleepStoreAdapter` |
+| `UrlEnricherPort` | `UrlEnricherAdapter` |
+| `StreamSource` | `SidecarAdapter` (sidecar yt-dlp) |
+| `AudioPipeline` | `FfmpegAdapter` |
+| `MusicPresenter` | `DiscordPresenterAdapter` |
+| `VoiceConnectionPort` | `VoiceAdapter` (@discordjs/voice) |
+| `CatalogPort` | `NavidromeAdapter` (Subsonic) |
+
+Los adaptadores primarios (entrada, sin puerto que implementar) conservan el
+sufijo Nest idiomático: `WebController` (HTTP), `SlashCommandsService` y
+`YtdlUpdaterService` (cron horario de yt-dlp).
 
 Referencias históricas: el código Python original vive en la rama `legacy-python`;
 `docs/` y las guías de agentes IA se conservan en disco, fuera del repo.

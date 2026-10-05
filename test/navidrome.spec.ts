@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { NavidromeService } from '../src/navidrome/infrastructure/navidrome.service';
+import { NavidromeAdapter } from '../src/navidrome/infrastructure/navidrome.adapter';
 import { SongVo } from '../src/navidrome/domain/song.vo';
 import { ConfigService } from '../src/common/config.service';
 import { createHash } from 'crypto';
@@ -22,10 +22,10 @@ class MockConfig extends ConfigService {
   }
 }
 
-function makeService(fetchImpl?: any): { svc: NavidromeService; restore: () => void } {
+function makeService(fetchImpl?: any): { svc: NavidromeAdapter; restore: () => void } {
   const original = global.fetch;
   if (fetchImpl) (global as any).fetch = fetchImpl;
-  const svc = new NavidromeService(new MockConfig());
+  const svc = new NavidromeAdapter(new MockConfig());
   return { svc, restore: () => ((global as any).fetch = original) };
 }
 
@@ -46,7 +46,7 @@ describe('SongVo — normalización defensiva del crudo Subsonic', () => {
   });
 });
 
-describe('NavidromeService — auth MD5-salt + URLs', () => {
+describe('NavidromeAdapter — auth MD5-salt + URLs', () => {
   it('getStreamUrl arma /rest/stream con u, s (6), t=md5(password+salt)', () => {
     const { svc, restore } = makeService();
     const url = svc.getStreamUrl('mf1234');
@@ -79,13 +79,13 @@ describe('NavidromeService — auth MD5-salt + URLs', () => {
   it('getCoverUrl cae a baseUrl si no hay external_url', () => {
     const cfg = new MockConfig();
     cfg.store.navidrome_external_url = '';
-    const svc = new NavidromeService(cfg);
+    const svc = new NavidromeAdapter(cfg);
     const url = svc.getCoverUrl('co1');
     expect(url).toContain('http://navi.local:30043/rest/getCoverArt?');
   });
 });
 
-describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
+describe('NavidromeAdapter — unwrapping de respuestas Subsonic', () => {
   it('search devuelve searchResult3 tipado (SongVo/álbumes/artistas)', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -168,14 +168,14 @@ describe('NavidromeService — unwrapping de respuestas Subsonic', () => {
     const fetchImpl = vi.fn();
     const original = (global as any).fetch;
     (global as any).fetch = fetchImpl;
-    const svc = new NavidromeService(cfg);
+    const svc = new NavidromeAdapter(cfg);
     await expect(svc.getRandomSongs(5)).resolves.toEqual([]);
     (global as any).fetch = original;
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
-describe('NavidromeService — radio por artista', () => {
+describe('NavidromeAdapter — radio por artista', () => {
   const SONGS = [
     { id: '1', artist: 'Radiohead' },
     { id: '2', artist: 'radiohead' }, // case-insensitive

@@ -36,7 +36,7 @@ export class VoiceAdapter extends VoiceConnectionPort {
     vc: VoiceChannelRef,
     onLost?: (why: string) => void,
   ): Promise<ConnectionHandle | null> {
-    // Captura lazy del Client: skip votes funcionan antes del primer loop del DiscordService.
+    // Captura lazy del Client: skip votes funcionan antes del primer loop del DiscordAdapter.
     if (vc.guild?.client) this.client = vc.guild.client;
     const existing = getVoiceConnection(guildId);
 

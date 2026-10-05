@@ -4,7 +4,7 @@ export interface VoiceChannelRef {
   id: string;
   guild: {
     voiceAdapterCreator: unknown;
-    // Capturado lazy por el adapter (skip/humansInVoice antes del primer loop del DiscordService).
+    // Capturado lazy por el adapter (skip/humansInVoice antes del primer loop del DiscordAdapter).
     client?: unknown;
     members?: { me?: { voice?: { channelId?: string | null; disconnect?: () => Promise<unknown> } } };
   };
@@ -32,6 +32,6 @@ export abstract class VoiceConnectionPort {
 
   abstract humansInVoice(guildId: string, channelId: string): Promise<{ id: string }[]>;
 
-  /** Inyección lazy del Client: lo pasa DiscordService en su loop de VC vacíos. */
+  /** Inyección lazy del Client: lo pasa DiscordAdapter en su loop de VC vacíos. */
   abstract setClient(client: unknown): void;
 }

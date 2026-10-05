@@ -13,8 +13,8 @@ const IV_LEN = 12;
 const TAG_LEN = 16;
 
 @Injectable()
-export class CryptoService extends EncryptorPort implements OnModuleInit {
-  private readonly logger = new Logger(CryptoService.name);
+export class CryptoAdapter extends EncryptorPort implements OnModuleInit {
+  private readonly logger = new Logger(CryptoAdapter.name);
   private key!: Buffer;
   private ready: Promise<void>;
 

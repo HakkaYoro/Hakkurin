@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { DiscordService } from './infrastructure/discord.service';
+import { DiscordAdapter } from './infrastructure/discord.adapter';
 import { SmartResponseService } from './application/smart-response.service';
 import { ReminderService } from './application/reminder.service';
 import { HolidayService } from './application/holiday.service';
@@ -36,13 +36,13 @@ import { UrlEnricherPort } from './domain/ports/url-enricher.port';
     SlashCommandsService,
     MusicUiService,
     ActionParserService,
-    DiscordService,
-    { provide: MessageTransportPort, useExisting: DiscordService },
-    { provide: BotStatePort, useExisting: DiscordService },
+    DiscordAdapter,
+    { provide: MessageTransportPort, useExisting: DiscordAdapter },
+    { provide: BotStatePort, useExisting: DiscordAdapter },
     { provide: UrlEnricherPort, useExisting: UrlEnricherAdapter },
     { provide: HolidayStorePort, useExisting: HolidayStoreAdapter },
     { provide: SleepStorePort, useExisting: SleepStoreAdapter },
   ],
-  exports: [DiscordService],
+  exports: [DiscordAdapter],
 })
 export class DiscordModule {}

@@ -11,8 +11,8 @@ const RESET_TIMEOUT_MS = 5_000;
 // extract que llegue en ese hueco se rechaza con ECONNREFUSED.
 const CONN_ERR_CODES = ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND'];
 
-export class SidecarClient extends StreamSource {
-  private readonly logger = new Logger(SidecarClient.name);
+export class SidecarAdapter extends StreamSource {
+  private readonly logger = new Logger(SidecarAdapter.name);
   private readonly config: ConfigService;
 
   constructor(config: ConfigService) {

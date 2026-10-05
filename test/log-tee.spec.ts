@@ -13,12 +13,12 @@ afterEach(() => vi.restoreAllMocks());
 
 it('captura línea con timestamp, nivel y contexto', () => {
   const t = new LogTeeService();
-  t.log('hola mundo', 'SidecarClient');
+  t.log('hola mundo', 'SidecarAdapter');
   t.warn('cuidado');
   t.error('boom');
   const out = t.text();
   expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/m); // timestamp ISO
-  expect(out).toContain('LOG [SidecarClient] hola mundo');
+  expect(out).toContain('LOG [SidecarAdapter] hola mundo');
   expect(out).toContain('WARN cuidado');
   expect(out).toContain('ERROR boom');
 });

@@ -9,7 +9,7 @@ import { DiscordModule } from './discord/discord.module';
 import { WebModule } from './web/web.module';
 
 // ponytail: los @Interval(60000) de Phase 6 viven directamente como métodos en
-// DiscordService (ya inyecta music+client); ScheduleModule.forRoot() los activa.
+// DiscordAdapter (ya inyecta music+client); ScheduleModule.forRoot() los activa.
 // No hace falta un SchedulerModule/SchedulerService aparte: serían puro delegado.
 @Module({
   imports: [

@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.provider';
+import { GeminiAdapter, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.adapter';
 import { parseAnalysisJson, errorAnalysisResult } from '../src/ai/infrastructure/mappers/gemini.mapper';
 import { ConfigService } from '../src/common/config.service';
 import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
@@ -22,7 +22,7 @@ class MockConfig extends ConfigService {
   }
 }
 
-function makeProvider(generateContent: any): GeminiProvider {
+function makeProvider(generateContent: any): GeminiAdapter {
   const config = new MockConfig();
   (config as any).store.gemini_keys = []; // evita construcción de cliente real en el ctor
   // Fake del puerto ContextBuilder (el provider ya no conoce MemoryService).
@@ -33,7 +33,7 @@ function makeProvider(generateContent: any): GeminiProvider {
       imageMime: ctx.imageMimeType ?? null,
     }),
   };
-  const provider = new GeminiProvider(config, context);
+  const provider = new GeminiAdapter(config, context);
   // stub del factory de cliente: toda rotación crea un mock que usa el mismo generateContent.
   (provider as any).createClient = () => ({ models: { generateContent } });
   (provider as any).keys = ['key-0', 'key-1'];
@@ -54,7 +54,7 @@ function ctx(over: Partial<InteractionContext> = {}): InteractionContext {
   };
 }
 
-describe('GeminiProvider (contracto AiBrain)', () => {
+describe('GeminiAdapter (contracto AiBrain)', () => {
   it('analyzeInteraction devuelve AnalysisResult con shape correcto (Gemma primary, JSON parseado)', async () => {
     // Gemma (primary) no soporta JSON mode → devuelve texto con fences.
     const generateContent = vi.fn().mockResolvedValue({

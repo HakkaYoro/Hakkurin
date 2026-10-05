@@ -28,10 +28,11 @@ import { HolidayService } from '../application/holiday.service';
 import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort, SendOptions } from '../domain/ports/message-transport.port';
+import { BotLifecycle } from '../../web/application/ports/bot-lifecycle.port';
 
 @Injectable()
-export class DiscordService implements OnModuleInit, OnModuleDestroy, MessageTransportPort, BotStatePort {
-  private readonly logger = new Logger(DiscordService.name);
+export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTransportPort, BotStatePort, BotLifecycle {
+  private readonly logger = new Logger(DiscordAdapter.name);
   private client: Client | null = null;
   private ready: Promise<void>;
   private readyResolve!: () => void;

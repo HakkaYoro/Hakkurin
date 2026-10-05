@@ -1,9 +1,9 @@
 import { WebController } from '../src/web/infrastructure/web.controller';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
-import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
-import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
+import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
+import { MemoryQueueAdapter } from '../src/memory/infrastructure/persistence/memory-queue.adapter';
 import { MemoryService } from '../src/memory/application/memory.service';
 import { BOT_SELF_ID } from '../src/memory/application/memory.service';
 
@@ -28,12 +28,12 @@ class MockConfig extends ConfigService {
 
 function makeController() {
   const config = new MockConfig();
-  const cryptoSvc = new CryptoService();
-  const memory = new MemoryService(cryptoSvc, new MemoryRepository(cryptoSvc), new MemoryQueue(), new EventEmitter2());
+  const cryptoSvc = new CryptoAdapter();
+  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter(), new EventEmitter2());
   const discord = { forceShutdownAndSummarize: vi.fn(async () => {}), restart: vi.fn(async () => {}) } as any;
   const brain = { reloadConfig: vi.fn(async () => {}) } as any;
   const view = { render: vi.fn(async () => '<html>ok</html>') } as any;
-  const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarClient] falló') } as any;
+  const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarAdapter] falló') } as any;
   const ctl = new WebController(config, memory, discord, brain, view, logTee);
   return { ctl, config, memory, discord, brain, view, logTee };
 }
@@ -101,7 +101,7 @@ describe('WebController — logs', () => {
   it('GET /logs devuelve el contenido del LogTee (descarga plain-text)', () => {
     const { ctl, logTee } = makeController();
     expect(ctl.logs()).toBe(logTee.text());
-    expect(ctl.logs()).toContain('[SidecarClient]');
+    expect(ctl.logs()).toContain('[SidecarAdapter]');
   });
 });
 

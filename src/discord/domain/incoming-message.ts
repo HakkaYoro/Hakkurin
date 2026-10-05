@@ -4,7 +4,7 @@ export interface IncomingAttachment {
   contentType: string | null;
 }
 
-/** DTO sin tipos de discord.js; DiscordService lo construye desde el Message real. */
+/** DTO sin tipos de discord.js; DiscordAdapter lo construye desde el Message real. */
 export interface IncomingMessage {
   id: string;
   channelId: string;

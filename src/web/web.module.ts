@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DiscordModule } from '../discord/discord.module';
-import { DiscordService } from '../discord/infrastructure/discord.service';
+import { DiscordAdapter } from '../discord/infrastructure/discord.adapter';
 import { MemoryModule } from '../memory/memory.module';
 import { AiModule } from '../ai/ai.module';
 import { BotLifecycle } from './application/ports/bot-lifecycle.port';
@@ -17,8 +17,8 @@ import { LogTeeService } from './infrastructure/log-tee.service';
     ViewService,
     AuthGuard,
     LogTeeService, // registrado como logger global en main.ts (app.get + useLogger)
-    // useExisting exige que un módulo importado exporte DiscordService.
-    { provide: BotLifecycle, useExisting: DiscordService },
+    // useExisting exige que un módulo importado exporte DiscordAdapter.
+    { provide: BotLifecycle, useExisting: DiscordAdapter },
   ],
 })
 export class WebModule {}

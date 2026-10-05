@@ -1,4 +1,4 @@
-// El @Interval vive en DiscordService: dedupe en memoria de esta instancia entre iteraciones del loop.
+// El @Interval vive en DiscordAdapter: dedupe en memoria de esta instancia entre iteraciones del loop.
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';

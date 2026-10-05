@@ -3,12 +3,12 @@ import { ChannelType } from 'discord.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MusicService } from '../src/music/application/music.service';
 import { QueueItemVo } from '../src/music/domain/music.domain';
-import { SidecarClient } from '../src/music/infrastructure/adapters/sidecar.client';
+import { SidecarAdapter } from '../src/music/infrastructure/adapters/sidecar.adapter';
 import { FfmpegAdapter } from '../src/music/infrastructure/adapters/ffmpeg.adapter';
-import { DiscordPresenter } from '../src/music/infrastructure/adapters/music.presenter';
+import { DiscordPresenterAdapter } from '../src/music/infrastructure/adapters/discord-presenter.adapter';
 import { ConfigService } from '../src/common/config.service';
 
-// Fakes: VoiceConnectionPort y CatalogPort. El StreamSource real (SidecarClient)
+// Fakes: VoiceConnectionPort y CatalogPort. El StreamSource real (SidecarAdapter)
 // corre contra fetch stubbed y el AudioPipeline real (FfmpegAdapter) contra
 // child_process mockeado — determinista y sin audio ni red real.
 vi.mock('child_process', async () => {
@@ -81,7 +81,7 @@ function makeFakeVoice(over: Record<string, any> = {}) {
 function makeService(catalog = makeCatalog(), voiceOver: Record<string, any> = {}) {
   const config = new MockConfig();
   const { voice, conns, players, lost } = makeFakeVoice(voiceOver);
-  const svc = new MusicService(config, catalog, new SidecarClient(config), new FfmpegAdapter(), new DiscordPresenter(), voice, new EventEmitter2());
+  const svc = new MusicService(config, catalog, new SidecarAdapter(config), new FfmpegAdapter(), new DiscordPresenterAdapter(), voice, new EventEmitter2());
   const channel: any = { id: 'c1', type: ChannelType.GuildText, send: vi.fn(async () => {}) };
   const guild: any = { id: 'g1' };
   return { svc, catalog, voice, conns, players, lost, channel, guild };
@@ -534,7 +534,7 @@ describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', ()
   });
 });
 
-describe('SidecarClient — precedencia de URL (env > config > default)', () => {
+describe('SidecarAdapter — precedencia de URL (env > config > default)', () => {
   afterEach(() => {
     delete process.env.YTDL_SIDECAR_URL;
     vi.unstubAllGlobals();

@@ -27,7 +27,7 @@ export class YtdlUpdaterService {
 
   @Interval(3_600_000)
   async checkForUpdate(): Promise<void> {
-    // Guard de reentrada (patrón de los loops de DiscordService): el update
+    // Guard de reentrada (patrón de los loops de DiscordAdapter): el update
     // puede tardar minutos; el setInterval crudo dispararía una 2ª concurrente.
     if (this.running) return;
     this.running = true;

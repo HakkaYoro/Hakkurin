@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { CryptoService } from './infrastructure/persistence/crypto.service';
-import { MemoryQueue } from './infrastructure/persistence/memory.queue';
-import { MemoryRepository } from './infrastructure/persistence/memory.repository';
+import { CryptoAdapter } from './infrastructure/persistence/crypto.adapter';
+import { MemoryQueueAdapter } from './infrastructure/persistence/memory-queue.adapter';
+import { MemoryRepositoryAdapter } from './infrastructure/persistence/memory-repository.adapter';
 import { EncryptorPort, MemoryQueuePort, MemoryRepositoryPort } from './domain/ports/memory.ports';
 import { MemoryService } from './application/memory.service';
 import { MemoryEventsListener } from './application/memory-events.listener';
@@ -10,12 +10,12 @@ import { MemoryEventsListener } from './application/memory-events.listener';
 // classes y Nest resuelve por el tipo declarado (no por la instancia concreta).
 @Module({
   providers: [
-    CryptoService,
-    MemoryRepository,
-    MemoryQueue,
-    { provide: EncryptorPort, useExisting: CryptoService },
-    { provide: MemoryRepositoryPort, useExisting: MemoryRepository },
-    { provide: MemoryQueuePort, useExisting: MemoryQueue },
+    CryptoAdapter,
+    MemoryRepositoryAdapter,
+    MemoryQueueAdapter,
+    { provide: EncryptorPort, useExisting: CryptoAdapter },
+    { provide: MemoryRepositoryPort, useExisting: MemoryRepositoryAdapter },
+    { provide: MemoryQueuePort, useExisting: MemoryQueueAdapter },
     MemoryService,
     MemoryEventsListener,
   ],

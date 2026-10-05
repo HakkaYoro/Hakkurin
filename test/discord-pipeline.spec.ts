@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import { DiscordAPIError, PermissionFlagsBits } from 'discord.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DiscordService } from '../src/discord/infrastructure/discord.service';
+import { DiscordAdapter } from '../src/discord/infrastructure/discord.adapter';
 import { SmartResponseService } from '../src/discord/application/smart-response.service';
 import { ReminderService } from '../src/discord/application/reminder.service';
 import { HolidayService } from '../src/discord/application/holiday.service';
@@ -10,9 +10,9 @@ import { StealthDmService } from '../src/discord/application/stealth-dm.service'
 import { SleepService } from '../src/discord/application/sleep.service';
 import { ActionParserService } from '../src/scheduler/application/action-parser.service';
 import { ConfigService } from '../src/common/config.service';
-import { CryptoService } from '../src/memory/infrastructure/persistence/crypto.service';
-import { MemoryRepository } from '../src/memory/infrastructure/persistence/memory.repository';
-import { MemoryQueue } from '../src/memory/infrastructure/persistence/memory.queue';
+import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
+import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
+import { MemoryQueueAdapter } from '../src/memory/infrastructure/persistence/memory-queue.adapter';
 import { MemoryService, BOT_SELF_ID } from '../src/memory/application/memory.service';
 import { MemoryEventsListener } from '../src/memory/application/memory-events.listener';
 import {
@@ -24,7 +24,7 @@ import { UrlContext, UrlEnricherPort } from '../src/discord/domain/ports/url-enr
 import { HolidayStoreAdapter } from '../src/discord/infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from '../src/discord/infrastructure/persistence/sleep-store.adapter';
 
-// Pipeline completo de DiscordService con dependencias reales donde es barato
+// Pipeline completo de DiscordAdapter con dependencias reales donde es barato
 // (conversación, memoria cifrada real en tmp, stores de disco, parser) y fakes
 // en los bordes de red (cliente de discord.js, brain, music).
 
@@ -64,16 +64,16 @@ function makeClient(): any {
 function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   const config = new MockConfig();
   Object.assign(config.store, store);
-  const cryptoSvc = new CryptoService();
+  const cryptoSvc = new CryptoAdapter();
   const events = new EventEmitter2();
-  const memory = new MemoryService(cryptoSvc, new MemoryRepository(cryptoSvc), new MemoryQueue(), events);
+  const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter(), events);
   const conversation = new ConversationService(brain, memory);
   const parser = new ActionParserService();
   const music = { getNowPlaying: vi.fn(() => null), checkEmptyVoiceChannels: vi.fn(async () => {}) } as any;
 
-  // Mismo ciclo que en producción (DiscordService ↔ use-cases vía puertos): los
+  // Mismo ciclo que en producción (DiscordAdapter ↔ use-cases vía puertos): los
   // proxies delegan en la instancia que se crea un poco más abajo.
-  const ref: { svc?: DiscordService } = {};
+  const ref: { svc?: DiscordAdapter } = {};
   class LazyTransport extends MessageTransportPort {
     isChannelSendable(id: string) {
       return ref.svc!.isChannelSendable(id);
@@ -126,7 +126,7 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   );
   const reminders = new ReminderService(memory, brain, parser, transport);
   const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());
-  const svc = new DiscordService(
+  const svc = new DiscordAdapter(
     config, conversation, brain, memory,
     stealthDm, sleep,
     music,
@@ -166,7 +166,7 @@ async function memoryReady(memory: MemoryService) {
   await (memory as any).onModuleInit();
 }
 
-describe('DiscordService — pipeline de mensajes', () => {
+describe('DiscordAdapter — pipeline de mensajes', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     vi.useRealTimers();
@@ -295,7 +295,7 @@ describe('DiscordService — pipeline de mensajes', () => {
   });
 });
 
-describe('DiscordService — presencia y envío', () => {
+describe('DiscordAdapter — presencia y envío', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('updateBotStatus mapea online/idle/dnd con textos por defecto', async () => {
@@ -389,7 +389,7 @@ describe('DiscordService — presencia y envío', () => {
   });
 });
 
-describe('DiscordService — memoria y loops', () => {
+describe('DiscordAdapter — memoria y loops', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     vi.useRealTimers();
@@ -500,7 +500,7 @@ describe('DiscordService — memoria y loops', () => {
   });
 });
 
-describe('DiscordService — festividades', () => {
+describe('DiscordAdapter — festividades', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     vi.useRealTimers();

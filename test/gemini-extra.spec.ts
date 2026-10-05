@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { GeminiProvider, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.provider';
+import { GeminiAdapter, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.adapter';
 import { ConfigService } from '../src/common/config.service';
 import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
 
@@ -31,7 +31,7 @@ function makeProvider(generateContent: any) {
       imageMime: ctx.imageMimeType ?? null,
     }),
   };
-  const provider = new GeminiProvider(config, context);
+  const provider = new GeminiAdapter(config, context);
   (provider as any).keys = ['key-0'];
   (provider as any).createClient = () => ({ models: { generateContent } });
   return provider;
@@ -51,7 +51,7 @@ function ctx(over: Partial<InteractionContext> = {}): InteractionContext {
   };
 }
 
-describe('GeminiProvider — generateSummary', () => {
+describe('GeminiAdapter — generateSummary', () => {
   it('self-memory: prompt de conciencia interna y devuelve el texto', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: '### ESTADO\nenergía alta' });
     const p = makeProvider(generateContent);
@@ -81,7 +81,7 @@ describe('GeminiProvider — generateSummary', () => {
   });
 });
 
-describe('GeminiProvider — generateResponse', () => {
+describe('GeminiAdapter — generateResponse', () => {
   it('devuelve texto en éxito y null en fallo total', async () => {
     const ok = vi.fn().mockResolvedValue({ text: 'respuesta corta' });
     const p1 = makeProvider(ok);
@@ -108,7 +108,7 @@ describe('GeminiProvider — generateResponse', () => {
   });
 });
 
-describe('GeminiProvider — modo fallback persistente', () => {
+describe('GeminiAdapter — modo fallback persistente', () => {
   it('gemmas fallan → fallback gemini responde; la SIGUIENTE llamada va directo a fallback', async () => {
     const generateContent = vi.fn()
       // 1ª y 2ª: los dos primarios gemma 500 → break; 3ª: gemini-2.5-flash ok
@@ -133,7 +133,7 @@ describe('GeminiProvider — modo fallback persistente', () => {
   });
 });
 
-describe('GeminiProvider — web_search two-pass (solo modelos gemini)', () => {
+describe('GeminiAdapter — web_search two-pass (solo modelos gemini)', () => {
   it('function call web_search → ejecuta búsqueda y re-llama con functionResponse', async () => {
     const generateContent = vi.fn()
       .mockRejectedValueOnce(new Error('500 internal')) // gemma 31b cae
@@ -169,7 +169,7 @@ describe('GeminiProvider — web_search two-pass (solo modelos gemini)', () => {
   });
 });
 
-describe('GeminiProvider — analyzeInteraction extras', () => {
+describe('GeminiAdapter — analyzeInteraction extras', () => {
   it('adjunta la imagen como parte base64 y registra la petición en la key activa', async () => {
     const generateContent = vi.fn().mockResolvedValue({
       text: '```json\n{"intent":"reply","response_content":["hola"],"is_talking_to_me":true}\n```',
