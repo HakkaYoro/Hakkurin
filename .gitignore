@@ -16,3 +16,8 @@ node_modules/
 dist/
 *.fernet.bak
 memory.fernet.bak*
+
+# Instrucciones de agentes IA (locales, no van al repo)
+AGENTS.md
+CLAUDE.md
+.zcode/
