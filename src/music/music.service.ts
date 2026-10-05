@@ -55,6 +55,7 @@ export class MusicService {
   private readonly logger = new Logger(MusicService.name);
   private readonly guilds = new Map<string, GuildMusicState>();
   private readonly source: StreamSource;
+  private readonly sidecar: SidecarClient;
   private readonly pipeline: AudioPipeline;
   private readonly presenter: MusicPresenter;
 
@@ -65,7 +66,8 @@ export class MusicService {
     // ponytail: adaptadores concretos inline — una implementación por puerto, sin
     // fábrica ni DI especulativa. Upgrade path: inyectarlos por constructor si
     // aparece una segunda implementación.
-    this.source = new SidecarClient(config);
+    this.sidecar = new SidecarClient(config);
+    this.source = this.sidecar;
     this.pipeline = new FfmpegAdapter();
     this.presenter = new DiscordPresenter();
   }
@@ -219,6 +221,9 @@ export class MusicService {
     if (s.isFetching) { this.logger.debug('playNext abort: isFetching'); return; }
     if (isBusy(s)) { this.logger.debug('playNext abort: isBusy'); return; }
 
+    // Epoch: resetPlaybackState lo incrementa (stop/reset de VC vacío). Si cambió
+    // tras un await, esta sesión está cancelada → abortar sin crear ffmpeg/player.
+    const epoch = s.epoch;
     s.isFetching = true;
     s.textChannel = channel;
     let errored = false;
@@ -239,7 +244,10 @@ export class MusicService {
         s.playHistory.push(item);
         if (s.playHistory.length > 5) s.playHistory.shift();
 
-        const { streamUrl } = await this.source.resolve(item);
+        const fetchAbort = new AbortController();
+        s.fetchAbort = fetchAbort;
+        const { streamUrl } = await this.source.resolve(item, fetchAbort.signal);
+        if (s.epoch !== epoch) return; // /stop durante el extract
         const resource = this.pipeline.create(s, streamUrl);
         if (!resource) throw new Error('No se pudo crear el recurso de audio.');
 
@@ -260,6 +268,7 @@ export class MusicService {
         // PassThrough (1MB) y el player arranque con colchón. Sin esto el jitter de
         // fuente/red llega a underrun → stutter (CPU modesto i5-2400).
         await delay(PREBUFFER_MS);
+        if (s.epoch !== epoch) return; // /stop durante el pre-buffer
         player.play(resource);
 
         // Embed sólo para Navidrome con cover; el resto, texto plano.
@@ -274,11 +283,15 @@ export class MusicService {
       this.logger.error(`Error reproduciendo música: ${(e as Error).message}`);
       await this.presenter.playbackError(channel, (e as Error).message);
     } finally {
-      s.isFetching = false;
+      // Sólo la sesión dueña del epoch toca el flag: si un /stop (o un nuevo
+      // reset) la canceló, resetPlaybackState ya lo dejó en false y un playNext
+      // nuevo gestiona el suyo — pisarlo aquí abriría una reentrada fantasma.
+      if (s.epoch === epoch) s.isFetching = false;
     }
     // Avanzar sólo tras resetear isFetching: evita que el finally pise el flag de
-    // la recursión y abra una reentrada.
-    if (errored) void this.playNext(guild, channel);
+    // la recursión y abra una reentrada. Si la sesión fue abortada (epoch cambió),
+    // NO recurre: la cola que importaba ya se vació con el reset.
+    if (errored && s.epoch === epoch) void this.playNext(guild, channel);
   }
 
   private ensurePlayer(guildId: string): PlayerHandle {
@@ -439,8 +452,13 @@ export class MusicService {
     if (!interaction.deferred) await interaction.deferReply().catch(() => {});
     // Limpieza al 100%: cola, metadata de la canción actual, ffmpeg Y el player
     // (descartado → el próximo /play crea uno limpio en vez de reutilizar uno
-    // colgado que dejaría la cola estancada).
+    // colgado que dejaría la cola estancada). El epoch++ aborta además cualquier
+    // playNext en vuelo (fetch/prebuffer) — sin zombies.
     this.resetPlaybackState(interaction.guildId);
+    // Matar y limpiar el proceso yt-dlp del sidecar: a veces queda wedged en un
+    // extract. El contenedor se reinicia (restart: unless-stopped) en ~2s y el
+    // SidecarClient reintenta el extract una vez ante ECONNREFUSED.
+    this.sidecar.reset();
     const conn = getVoiceConnection(interaction.guildId);
     if (!conn) {
       await safeFollowup(interaction, 'No estoy conectado.');
@@ -545,6 +563,11 @@ export class MusicService {
    *  conexión (la destruye el caller vía tearDownConnection). */
   private resetPlaybackState(guildId: string): void {
     const s = this.state(guildId);
+    // Nueva generación: invalida cualquier playNext en vuelo (fetch 20s +
+    // prebuffer 5s) para que no spawnee ffmpeg/player sobre conexión muerta —
+    // el "zombie" que dejaba /stop estancado hasta un segundo /stop.
+    s.epoch += 1;
+    if (s.fetchAbort) { try { s.fetchAbort.abort(); } catch {} s.fetchAbort = null; }
     s.queue = [];
     s.skipVotes.clear();
     s.isRadioMode = false;

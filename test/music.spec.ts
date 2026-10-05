@@ -406,3 +406,101 @@ describe('MusicService — isIdle (para el auto-update del sidecar)', () => {
     expect(svc.isIdle()).toBe(false);
   });
 });
+
+describe('MusicService — /stop hard-kill (epoch + abort + /reset sidecar)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    h.conns.clear();
+  });
+
+  it('/stop durante el extract → playNext aborta: sin player nuevo, sin ffmpeg, epoch++', async () => {
+    let releaseFetch: (v: any) => void;
+    const gate = new Promise((r) => (releaseFetch = r));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/reset')) return { ok: true, json: async () => ({}) } as any;
+      return gate;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    const s = (svc as any).state('g1');
+    expect(s.isFetching).toBe(true);
+    const epochBefore = s.epoch;
+
+    // /stop con el extract colgado: resetPlaybackState + POST /reset + abort.
+    await svc.stop(makeInteraction({}));
+    expect(s.epoch).toBe(epochBefore + 1);
+    expect(s.player).toBeNull();
+    expect(s.queue).toEqual([]);
+    // El sidecar recibió POST /reset (matar proceso yt-dlp).
+    expect(fetchMock.mock.calls.some((c: any[]) => String(c[0]).includes('/reset'))).toBe(true);
+
+    // El extract por fin responde → la sesión vieja NO debe crear player/ffmpeg.
+    releaseFetch({ ok: true, json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }) });
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(s.player).toBeNull();
+    expect(s.ffmpeg).toBeNull();
+    expect(s.currentSong).toBeNull();
+  });
+
+  it('/stop durante el pre-buffer → player.play nunca ocurre', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }),
+    })));
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'navidrome', url: 'http://127.0.0.1:9/a', title: 'Song', artist: 'A', album: 'Al' }]);
+    await vi.advanceTimersByTimeAsync(2000); // dentro del pre-buffer de 5s
+    const player = h.lastPlayer();
+    const s = (svc as any).state('g1');
+
+    await svc.stop(makeInteraction({}));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(player.play).not.toHaveBeenCalled();
+    expect(s.player).toBeNull();
+    expect(s.currentSong).toBeNull();
+  });
+
+  it('extract con ECONNREFUSED (sidecar reiniciándose) → reintenta una vez a los 3s', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/reset')) return { ok: true, json: async () => ({}) } as any;
+      const callNumber = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract')).length;
+      if (callNumber === 1) {
+        const err: any = new Error('fetch failed');
+        err.cause = { code: 'ECONNREFUSED' };
+        throw err;
+      }
+      return { ok: true, json: async () => ({ stream_url: 'http://127.0.0.1:9/x', title: 'T' }) } as any;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/x' }]);
+    await vi.advanceTimersByTimeAsync(3500 + 6000); // retry 3s + prebuffer
+    const extracts = fetchMock.mock.calls.filter((c: any[]) => String(c[0]).includes('/extract'));
+    expect(extracts).toHaveLength(2);
+    expect((svc as any).state('g1').currentSong).toBe('T');
+  });
+
+  it('tras /stop la cola vieja no dispara la recursión de error del playNext abortado', async () => {
+    // El finally del playNext abortado no debe pisar isFetching de una sesión nueva.
+    let releaseFetch: (v: any) => void;
+    const gate = new Promise((r) => (releaseFetch = r));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/reset')) return { ok: true, json: async () => ({}) } as any;
+      return gate;
+    }));
+    const { svc, channel, guild } = makeService();
+    await svc.enqueueAndPlay(guild, channel, [{ type: 'youtube', url: 'https://youtu.be/vieja' }]);
+    await svc.stop(makeInteraction({}));
+    releaseFetch({ ok: false, status: 502, text: async () => 'blocked' });
+    await vi.advanceTimersByTimeAsync(2000);
+    const s = (svc as any).state('g1');
+    expect(s.isFetching).toBe(false); // resetPlaybackState lo dejó en false y el abortado no lo toca
+    // Sin mensajes de error al canal: la sesión abortada es silenciosa.
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+});

@@ -8,7 +8,7 @@ import type { GuildMusicState, QueueItem } from './music.domain';
 
 /** Resolución de la URL de stream de un item (sidecar yt-dlp / Navidrome directo). */
 export interface StreamSource {
-  resolve(item: QueueItem): Promise<{ streamUrl: string; title?: string }>;
+  resolve(item: QueueItem, signal?: AbortSignal): Promise<{ streamUrl: string; title?: string }>;
 }
 
 /** Creación del AudioResource (ffmpeg) y corte del proceso del track actual. */

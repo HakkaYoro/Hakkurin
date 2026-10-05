@@ -53,6 +53,11 @@ export interface GuildMusicState {
   connection: ConnectionHandle | null;
   textChannel: ChannelHandle | null;
   ffmpeg: ChildProcess | null; // proceso ffmpeg del track actual; SIGKILL al cambiar/cortar
+  // Generación del estado: resetPlaybackState la incrementa; playNext la captura
+  // al entrar y la verifica tras cada await. Si cambió, la sesión quedó cancelada
+  // por un /stop (o reset) y NO debe crear ffmpeg/player sobre conexión muerta.
+  epoch: number;
+  fetchAbort: AbortController | null; // aborta el fetch al sidecar en vuelo
 }
 
 export function newState(): GuildMusicState {
@@ -72,6 +77,8 @@ export function newState(): GuildMusicState {
     connection: null,
     textChannel: null,
     ffmpeg: null,
+    epoch: 0,
+    fetchAbort: null,
   };
 }
 
