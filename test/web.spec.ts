@@ -90,16 +90,17 @@ describe('ViewService (templates)', () => {
     expect(html).toContain('name="deafen_move_enabled"');
   });
 
-  it('index: tab stats — tabla con día, llamadas IA y % cacheado', () => {
+  it('index: tab stats — tabla con día, llamadas IA, % cacheado y coste', () => {
     const html = view.render('index.html', {
       ...baseCtx,
       stats: [
-        { day: '2026-10-16', messages: 9, aiCalls: { analyze: 4, response: 3 }, tokensIn: 100, tokensOut: 40, tokensCached: 25 },
+        { day: '2026-10-16', messages: 9, aiCalls: { analyze: 4, response: 3 }, tokensIn: 100, tokensOut: 40, tokensCached: 25, cost: 0.01234 },
       ],
     });
     expect(html).toContain('2026-10-16');
     expect(html).toContain('analyze: 4');
     expect(html).toContain('25%'); // 25 cached / 100 in
+    expect(html).toContain('0.0123'); // coste redondeado a 4 decimales
   });
 
   it('index: tab stats vacía — mensaje en vez de tabla', () => {

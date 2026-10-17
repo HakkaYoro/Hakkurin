@@ -60,7 +60,17 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
   }
 
   protected createClient(sdk: any, apiKey: string): OpenRouter {
-    return new sdk.OpenRouter({ apiKey });
+    // El default del SDK reintenta 5XX hasta 1 hora: un outage colgaría la
+    // respuesta del bot. Cap propio a 30s; el retry fino lo hace withRetry.
+    return new sdk.OpenRouter({
+      apiKey,
+      timeoutMs: 120_000,
+      retryConfig: {
+        strategy: 'backoff',
+        backoff: { initialInterval: 500, maxInterval: 8_000, exponent: 1.5, maxElapsedTime: 30_000 },
+        retryConnectionErrors: true,
+      },
+    });
   }
 
   private async initialize(): Promise<void> {
@@ -98,15 +108,26 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
       maxTokens: opts.maxTokens,
       sessionId: opts.sessionId,
     };
-    // Prompt caching: explícito para Anthropic; el resto usa caching automático.
-    if (model.startsWith('anthropic/')) chatRequest.cacheControl = { type: 'ephemeral' };
+    // Caching explícito según proveedor: Anthropic acepta la directiva a nivel
+    // raíz; Qwen (Alibaba) la exige por bloque (OpenAI/DeepSeek/Z.AI/Gemini son
+    // automáticos y no necesitan nada).
+    if (model.startsWith('anthropic/')) {
+      chatRequest.cacheControl = { type: 'ephemeral' };
+    } else if (model.includes('qwen')) {
+      const first = messages[0];
+      if (typeof first?.content === 'string') {
+        first.content = [{ type: 'text', text: first.content, cacheControl: { type: 'ephemeral' } }];
+      } else if (Array.isArray(first?.content) && first.content[0]?.type === 'text') {
+        first.content[0].cacheControl = { type: 'ephemeral' };
+      }
+    }
 
     const res = await this.client!.chat.send({ chatRequest });
     if (!('choices' in res)) return null; // nunca pedimos stream
     const usage: any = (res as any).usage;
     if (usage) {
       const cached = usage.promptTokensDetails?.cachedTokens ?? 0;
-      this.stats.addTokens(usage.promptTokens ?? 0, usage.completionTokens ?? 0, cached);
+      this.stats.addTokens(usage.promptTokens ?? 0, usage.completionTokens ?? 0, cached, usage.cost ?? 0);
       if (cached > 0) this.logger.debug(`Prompt cache hit de OpenRouter: ${cached} tokens`);
     }
 

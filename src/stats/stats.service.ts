@@ -12,6 +12,7 @@ export interface DayStat {
   tokensIn: number;
   tokensOut: number;
   tokensCached: number;
+  cost: number; // créditos OpenRouter (usage.cost); 0 en proveedores sin coste
 }
 
 const emptyDay = (): DayStat => ({
@@ -20,6 +21,7 @@ const emptyDay = (): DayStat => ({
   tokensIn: 0,
   tokensOut: 0,
   tokensCached: 0,
+  cost: 0,
 });
 
 function dayKey(d = new Date()): string {
@@ -64,11 +66,12 @@ export class StatsService implements OnModuleDestroy {
     d.aiCalls[kind] = (d.aiCalls[kind] ?? 0) + 1;
   }
 
-  addTokens(inTok: number, outTok: number, cached = 0): void {
+  addTokens(inTok: number, outTok: number, cached = 0, cost = 0): void {
     const d = this.day();
     d.tokensIn += inTok;
     d.tokensOut += outTok;
     d.tokensCached += cached;
+    d.cost = (d.cost ?? 0) + cost; // días viejos en stats.json no tienen cost
   }
 
   snapshot(count = 7): Array<DayStat & { day: string }> {

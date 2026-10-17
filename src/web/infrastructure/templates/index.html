@@ -210,6 +210,7 @@
                         <th>Tokens out</th>
                         <th>Cached</th>
                         <th>% cache</th>
+                        <th>Coste (créditos)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -222,6 +223,7 @@
                         <td>{{ d.tokensOut }}</td>
                         <td>{{ d.tokensCached }}</td>
                         <td>{% if d.tokensIn %}{{ (d.tokensCached * 100 / d.tokensIn) | round }}%{% else %}—{% endif %}</td>
+                        <td>{% if d.cost %}{{ d.cost | round(4) }}{% else %}—{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

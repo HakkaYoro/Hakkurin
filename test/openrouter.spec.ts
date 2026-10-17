@@ -26,11 +26,13 @@ class MockConfig extends ConfigService {
 
 class FakeStats {
   tokens = { in: 0, out: 0, cached: 0 };
+  cost = 0;
   calls: string[] = [];
-  addTokens(i: number, o: number, c = 0): void {
+  addTokens(i: number, o: number, c = 0, cost = 0): void {
     this.tokens.in += i;
     this.tokens.out += o;
     this.tokens.cached += c;
+    this.cost += cost;
   }
   bumpAiCall(kind: string): void {
     this.calls.push(kind);
@@ -122,6 +124,39 @@ describe('OpenRouterAdapter (contrato AiBrain)', () => {
 
     await adapter.generateResponse('x');
     expect(chatSend.mock.calls[1][0].chatRequest.cacheControl).toBeUndefined();
+  });
+
+  it('qwen: cache_control por bloque (content string → parts con cacheControl)', async () => {
+    const chatSend = vi.fn().mockResolvedValue(completion('ok'));
+    const { adapter } = makeAdapter(chatSend, { openrouter_chat_model: 'qwen/qwen4-72b' });
+
+    await adapter.generateResponse('hola');
+    const req = chatSend.mock.calls[0][0].chatRequest;
+    expect(req.cacheControl).toBeUndefined();
+    expect(req.messages[0].content).toEqual([
+      { type: 'text', text: expect.stringContaining('hola'), cacheControl: { type: 'ephemeral' } },
+    ]);
+  });
+
+  it('qwen: content ya en parts → cacheControl sobre el primer bloque texto', async () => {
+    const chatSend = vi.fn().mockResolvedValue(completion('{"intent":"ignore","response_content":[],"is_talking_to_me":false,"ping_users":[]}'));
+    const { adapter, chatSend: send } = makeAdapter(chatSend, { openrouter_chat_model: 'qwen/qwen4-72b' });
+
+    await adapter.analyzeInteraction(ctx());
+    const parts = send.mock.calls[0][0].chatRequest.messages[0].content;
+    expect(parts[0].cacheControl).toEqual({ type: 'ephemeral' });
+    expect(parts[0].text).toBe('PROMPT');
+  });
+
+  it('cost de usage se registra en stats junto a los tokens', async () => {
+    const chatSend = vi.fn().mockResolvedValue(
+      completion('ok', { promptTokens: 10, completionTokens: 5, promptTokensDetails: { cachedTokens: 3 }, cost: 0.0021 }),
+    );
+    const { adapter, stats } = makeAdapter(chatSend);
+
+    await adapter.generateResponse('x');
+    expect(stats.tokens).toEqual({ in: 10, out: 5, cached: 3 });
+    expect(stats.cost).toBeCloseTo(0.0021);
   });
 
   it('fallo en todos los intentos → errorAnalysisResult, nunca lanza (2 intentos)', async () => {
