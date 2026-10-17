@@ -43,7 +43,7 @@ export class ContextBuilderService implements ContextBuilder {
     const botAge = `${days} días, ${hours} horas y ${minutes} minutos`;
 
     // Menciones en el texto (<@id>) siempre cargan perfil completo y cola cruda.
-    const mentioned = [...ctx.userText.matchAll(/<@!?(\\d+)>/g)].map((m) => m[1]);
+    const mentioned = [...ctx.userText.matchAll(/<@!?(\d+)>/g)].map((m) => m[1]);
     // Ahorro de tokens: máximo 8 perfiles de usuarios activos; el hablante y los
     // mencionados entran siempre.
     const usersToLoad = new Set<string>([...(ctx.activeUserIds ?? []).slice(0, 8), ...mentioned]);
