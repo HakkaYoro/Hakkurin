@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
-import { ConfigService } from '../../common/config.service';
 import { StatsService } from '../../stats/stats.service';
 
 const MAX_INPUT = 4000;
@@ -19,7 +18,6 @@ export class TranslateService {
 
   constructor(
     @Inject(AiBrain) private readonly brain: AiBrain,
-    private readonly config: ConfigService,
     private readonly stats: StatsService,
   ) {}
 

@@ -1,21 +1,11 @@
 import { vi } from 'vitest';
 import { AiBrain } from '../src/ai/domain/ports/ai-brain.port';
-import { ConfigService } from '../src/common/config.service';
 import { TranslateService } from '../src/discord/application/translate.service';
-
-class MockConfig extends ConfigService {
-  store: Record<string, any> = {};
-  async load() {}
-  async save() {}
-  get<T = any>(key: string, d?: T): T {
-    return (this.store[key] as T) ?? (d as T);
-  }
-}
 
 function makeService(aiAnswer: string | null = 'hello') {
   const brain: any = { generateResponse: vi.fn(async () => aiAnswer) };
   const stats = { bumpAiCall: vi.fn() } as any;
-  const svc = new TranslateService(brain as unknown as AiBrain, new MockConfig(), stats);
+  const svc = new TranslateService(brain as unknown as AiBrain, stats);
   return { svc, brain, stats };
 }
 
