@@ -1,9 +1,10 @@
 name: Docker Build & Publish
 
-# Autobuild sólo en main. Otras ramas (legacy-python, features) NO publican imagen.
+# main → :latest. El resto de ramas listadas → :dev (test en el NAS sin
+# pisar la imagen estable). workflow_dispatch respeta la rama elegida.
 on:
   push:
-    branches: [main]
+    branches: [main, refactor/hexagonal-ddd]
   workflow_dispatch:
 
 env:
@@ -24,6 +25,14 @@ jobs:
       - name: Downcase Image Name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
+      - name: Pick image tag (main → latest, resto → dev)
+        run: |
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            echo "IMAGE_TAG=latest" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=dev" >> $GITHUB_ENV
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -40,7 +49,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=${{ env.IMAGE_TAG }}
             type=sha
 
       - name: Build and push Docker image
@@ -61,6 +70,6 @@ jobs:
         with:
           context: ./sidecar
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sidecar:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-sidecar:${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=sidecar
           cache-to: type=gha,mode=max,scope=sidecar
