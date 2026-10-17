@@ -11,24 +11,40 @@ el original queda en la rama `legacy-python`.
 
 ## Características
 
-- **Cerebro Gemma 4** — `gemma-4-31b-it` y `gemma-4-26b-a4b-it` alternados por request
-  para repartir cuota; ante 429 el ladder prueba el otro Gemma y después Gemini flash
-  como respaldo (40 min de modo fallback). Contexto capado a ~16k tokens, salida del
-  LLM validada con **zod** (extracción de JSON tras fences — Gemma no soporta JSON
-  mode) y búsqueda web two-pass en los modelos de respaldo.
+- **Cerebro Gemma 4 u OpenRouter** — `gemma-4-31b-it` y `gemma-4-26b-a4b-it` alternados
+  por request para repartir cuota; ante 429 el ladder prueba el otro Gemma y después
+  Gemini flash como respaldo (40 min de modo fallback). Alternativamente, proveedor
+  **OpenRouter** (SDK oficial) con modelo de chat y de memoria separados, prompt caching
+  (directiva raíz para Anthropic, por bloque para Qwen, automático en DeepSeek/Z.AI/
+  OpenAI/Gemini) y sticky routing por `session_id`; el proveedor se cambia desde la
+  WebUI en caliente. Contexto capado a ~16k tokens con historial configurable
+  (`max_history_messages`), salida del LLM validada con **zod** (extracción de JSON tras
+  fences — Gemma no soporta JSON mode) y búsqueda web two-pass en los modelos de
+  respaldo Gemini.
 - **Memoria cifrada AES-256-GCM** por usuario + auto-memoria del bot, resúmenes
   automáticos y recordatorios programados.
 - **Pipeline probabilístico** — mención, reply, actividad reciente o probabilidad
   configurable; debounce abortable si alguien sigue escribiendo.
+- **Traducción reaccionando con 🌐** — detecta el idioma del mensaje y traduce
+  (español ↔ inglés) en una sola llamada de IA.
+- **Moderación de voz** — quien se autoensordezca más de `deafen_move_minutes` (3 por
+  defecto) fuera del canal configurado es movido a un canal de reposo elegido en la
+  WebUI; destensordearse cancela el temporizador.
 - **Música** — YouTube vía sidecar yt-dlp (`player_client=android` anti-429) y Navidrome
   (Subsonic): `/play /skip /stop /queue /search /radio`, radio con auto-prefetch,
   ffmpeg → Opus 48k directo, `/stop` con epoch + abort + reset del sidecar y
   auto-actualización horaria de yt-dlp sin re-buildear imagen.
-- **WebUI** — dashboard server-rendered: config en vivo (secretos write-only), browse
-  y borrado de memorias y **Exportar Logs** (ring buffer en memoria, descarga
-  `hakkurin.log` protegida por el mismo AuthGuard HTTP Basic opt-in).
+- **WebUI** — dashboard server-rendered oscuro con pestañas: config en vivo (secretos
+  write-only), status card del bot (conexión, uptime, proveedor IA) refrescada cada 30s,
+  tabla de **estadísticas** (mensajes/día, llamadas IA por tipo, tokens con/sin caché y
+  coste en créditos), browse y borrado de memorias y **Exportar Logs** (ring buffer en
+  memoria, descarga `hakkurin.log` protegida por el mismo AuthGuard HTTP Basic opt-in).
+- **Reconexión automática** — login con reintento indefinido, watchdog que recrea el
+  cliente si el gateway queda zombie ~3 min, handlers de shard con logs y
+  `unhandledRejection`/`uncaughtException` capturados: un corte de red ya no mata al bot.
 - **Loops de fondo** — timeouts de sesión, cola de memoria, recovery de API,
-  festividades, recordatorios y limpieza de canales de voz, con guard de reentrada.
+  festividades, recordatorios, limpieza de canales de voz y flush de estadísticas, con
+  guard de reentrada.
 - **Arquitectura hexagonal + DDD** — cada feature se parte en `domain/` (entidades,
   value objects y puertos como abstract classes), `application/` (use-cases sin
   frameworks) e `infrastructure/` (adaptadores de Discord, voz, ffmpeg, sidecar y
@@ -37,9 +53,10 @@ el original queda en la rama `legacy-python`.
 
 ## Stack
 
-NestJS 11 · discord.js 14 · @discordjs/voice · @google/genai · @nestjs/event-emitter ·
-zod · nunjucks · vitest · AES-256-GCM vía `node:crypto`. Dos imágenes en GHCR: `bot`
-(~450 MB, ffmpeg estático) y `sidecar` (~210 MB, python:3.11-slim + yt-dlp).
+NestJS 11 · discord.js 14 · @discordjs/voice · @google/genai · @openrouter/sdk ·
+@nestjs/event-emitter · zod · nunjucks · vitest · AES-256-GCM vía `node:crypto`. Dos
+imágenes en GHCR: `bot` (~450 MB, ffmpeg estático) y `sidecar` (~210 MB,
+python:3.11-slim + yt-dlp).
 
 ## Despliegue (NAS / servidor)
 
@@ -107,19 +124,22 @@ eventos y **puertos** como abstract classes), `application/` (use-cases) e
 ```
 src/
   common/        ConfigService @Global (data/config.json atómico, sidecarUrl())
-  ai/            puerto AiBrain; GeminiAdapter (ladder, rotación de keys);
-                 mapper zod de la salida del LLM
+  stats/         StatsService @Global: mensajes, llamadas IA y tokens/coste por día
+                 (flush atómico a data/stats.json)
+  ai/            puerto AiBrain; RoutingBrain delega a GeminiAdapter u
+                 OpenRouterAdapter según ai_provider (hot-swap); mapper zod de la
+                 salida del LLM
   memory/        agregado UserMemory, cifrado AES-256-GCM, cola con mutex,
                  listener de eventos para la auto-memoria
   conversation/  entidades Session/ChannelContext, historial de canales
-  discord/       gateway + loops de fondo (DiscordAdapter, implementa
-                 MessageTransportPort + BotStatePort + BotLifecycle);
+  discord/       gateway con reconexión propia + loops de fondo (DiscordAdapter,
+                 implementa MessageTransportPort + BotStatePort + BotLifecycle);
                  use-cases puros (respuesta, recordatorios, festividades, DMs,
-                 parser de acciones programadas)
+                 traducción, parser de acciones programadas)
   music/         GuildMusicState + QueueItemVo; puertos de voz/audio/stream;
                  adaptadores @discordjs/voice, ffmpeg, sidecar yt-dlp, presenter
   navidrome/     SongVo + NavidromeAdapter (cliente Subsonic, CatalogPort)
-  web/           WebUI nunjucks, AuthGuard, LogTee (export de logs)
+  web/           WebUI nunjucks (pestañas, status, stats), AuthGuard, LogTee
 sidecar/         FastAPI + yt-dlp: /extract, /version, /update, /reset
 test/            specs de vitest, un archivo por módulo (cwd tmp aislado)
 ```
@@ -130,7 +150,7 @@ cada uno tiene su adaptador en `infrastructure/`:
 
 | Puerto (`domain/ports/`) | Adaptador (`infrastructure/`) |
 |---|---|
-| `AiBrain` | `GeminiAdapter` (Gemma + ladder) |
+| `AiBrain` | `RoutingBrain` → `GeminiAdapter` (Gemma + ladder) / `OpenRouterAdapter` |
 | `EncryptorPort` · `MemoryRepositoryPort` · `MemoryQueuePort` | `CryptoAdapter` · `MemoryRepositoryAdapter` · `MemoryQueueAdapter` |
 | `MessageTransportPort` · `BotStatePort` · `BotLifecycle` | `DiscordAdapter` (gateway primario + loops) |
 | `HolidayStorePort` · `SleepStorePort` | `HolidayStoreAdapter` · `SleepStoreAdapter` |
