@@ -7,6 +7,15 @@ import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
 // Verificación conductual del contrato AiBrain con un client @google/genai mockeado.
 // Complementa el review estático. No toca la red.
 
+class FakeStats {
+  tokens = { in: 0, out: 0, cached: 0 };
+  addTokens(i: number, o: number, c = 0): void {
+    this.tokens.in += i;
+    this.tokens.out += o;
+    this.tokens.cached += c;
+  }
+}
+
 class MockConfig extends ConfigService {
   private store: Record<string, any> = {
     gemini_keys: ['key-0', 'key-1'],
@@ -33,7 +42,7 @@ function makeProvider(generateContent: any): GeminiAdapter {
       imageMime: ctx.imageMimeType ?? null,
     }),
   };
-  const provider = new GeminiAdapter(config, context);
+  const provider = new GeminiAdapter(config, context, new FakeStats() as any);
   // stub del factory de cliente: toda rotación crea un mock que usa el mismo generateContent.
   (provider as any).createClient = () => ({ models: { generateContent } });
   (provider as any).keys = ['key-0', 'key-1'];
@@ -224,6 +233,28 @@ describe('GeminiAdapter — generateResponse', () => {
     expect(generateContent.mock.calls).toHaveLength(3);
     expect(models[0]).toBe(models[1]); // 2 intentos del mismo primario
     expect(models[2]).not.toBe(models[0]); // el ladder siguió con otro modelo
+  });
+});
+
+describe('GeminiAdapter — presupuesto de salida y tokens reales', () => {
+  it('maxOutputTokens 600 en generateResponse y usageMetadata registrado en StatsService', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      text: 'respuesta',
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, cachedContentTokenCount: 50 },
+    });
+    const p = makeProvider(generateContent);
+    await expect(p.generateResponse('x')).resolves.toBe('respuesta');
+    expect(generateContent.mock.calls[0][0].config.maxOutputTokens).toBe(600);
+    expect((p as any).stats.tokens).toEqual({ in: 100, out: 20, cached: 50 });
+  });
+
+  it('analyzeInteraction pide maxOutputTokens 800', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      text: '{"intent":"ignore","response_content":[],"is_talking_to_me":false}',
+    });
+    const p = makeProvider(generateContent);
+    await p.analyzeInteraction(ctx());
+    expect(generateContent.mock.calls[0][0].config.maxOutputTokens).toBe(800);
   });
 });
 

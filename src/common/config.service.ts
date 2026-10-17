@@ -23,6 +23,11 @@ export interface HakkurinConfig {
   deafen_move_enabled?: boolean;
   deafen_move_channel_id?: string;
   deafen_move_minutes?: number;
+  ai_provider?: string; // 'gemini' | 'openrouter'
+  openrouter_api_key?: string;
+  openrouter_chat_model?: string;
+  openrouter_memory_model?: string;
+  max_history_messages?: number;
   [key: string]: any;
 }
 
@@ -36,6 +41,8 @@ const DEFAULTS: HakkurinConfig = {
   reply_probability: 0.125,
   developer_id: '321799812595056645',
   deafen_move_minutes: 3,
+  ai_provider: 'gemini',
+  max_history_messages: 20,
 };
 
 @Injectable()

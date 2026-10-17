@@ -12,6 +12,11 @@ it('defaults: get devuelve el valor por defecto y getAll el objeto completo', as
   expect(c.get('reply_probability')).toBe(0.125);
   expect(c.get('inexistente', 'fallback')).toBe('fallback');
   expect(c.getAll().allowed_channels).toEqual([]);
+  expect(c.get('ai_provider')).toBe('gemini');
+  expect(c.get('max_history_messages')).toBe(20);
+  // Los modelos y la key de OpenRouter no tienen default: la WebUI los pide.
+  expect(c.get('openrouter_api_key', '')).toBe('');
+  expect(c.get('openrouter_chat_model', '')).toBe('');
 });
 
 it('set persiste en disco y una instancia nueva lo lee de vuelta', async () => {

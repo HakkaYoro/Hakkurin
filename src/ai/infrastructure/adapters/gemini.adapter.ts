@@ -11,6 +11,7 @@ import {
 import { ConfigService } from '../../../common/config.service';
 import { searchDdg } from '../ddg-search';
 import { shuffle as shuffleArr } from '../../../common/util';
+import { StatsService } from '../../../stats/stats.service';
 import { KeyUsage } from '../../domain/key-rotation';
 import {
   buildHolidayGreetingPrompt,
@@ -49,6 +50,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     @Inject(ContextBuilderService) private readonly context: ContextBuilder,
+    private readonly stats: StatsService,
   ) {}
 
   // onModuleInit y no ctor: ConfigService aún no leyó config.json en el ctor.
@@ -122,6 +124,12 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
     this.gemmaTokensThisMinute += tokens;
   }
 
+  private registerUsage(response: any): void {
+    const u = response?.usageMetadata;
+    if (!u) return;
+    this.stats.addTokens(u.promptTokenCount ?? 0, u.candidatesTokenCount ?? 0, u.cachedContentTokenCount ?? 0);
+  }
+
   private async generateWithRetry(
     prompt: string | Part[],
     baseConfig: GenerateContentConfig,
@@ -180,6 +188,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
             contents: prompt,
             config: currentConfig,
           });
+          this.registerUsage(response);
 
           // Two-pass: si el modelo pidió web_search, ejecutar y re-llamar.
           const fcs = response.functionCalls;
@@ -210,6 +219,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
                 ],
                 config: secondConfig,
               });
+              this.registerUsage(response);
             }
           }
 
@@ -271,6 +281,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
       temperature: 0.85,
       topP: 0.95,
       topK: 40,
+      maxOutputTokens: 800,
       responseMimeType: 'application/json',
     };
 
@@ -289,7 +300,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
   async generateHolidayGreeting(userSummary: string, holidayName: string): Promise<string> {
     this.getUsage(this.currentKeyIndex).registerRequest();
     const prompt = buildHolidayGreetingPrompt(userSummary, holidayName);
-    const configGen: GenerateContentConfig = { temperature: 0.9, topP: 0.95, topK: 40 };
+    const configGen: GenerateContentConfig = { temperature: 0.9, topP: 0.95, topK: 40, maxOutputTokens: 300 };
     const result = await this.generateWithRetry(prompt, configGen, false);
     return result || `feliz ${holidayName} supongo...`;
   }
@@ -309,7 +320,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
       prompt = buildUserProfilePrompt(userId, currentSummary, recentInteractions);
     }
 
-    const configGen: GenerateContentConfig = { temperature: 0.85, topP: 0.95, topK: 40 };
+    const configGen: GenerateContentConfig = { temperature: 0.85, topP: 0.95, topK: 40, maxOutputTokens: 600 };
     return this.generateWithRetry(prompt, configGen, false, modelName);
   }
 
@@ -333,7 +344,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
     userName = 'Sistema',
   ): Promise<string | null> {
     const full = buildSystemResponsePrompt(prompt, userContextId, userName);
-    const configGen: GenerateContentConfig = { temperature: 0.85, topP: 0.95, topK: 40 };
+    const configGen: GenerateContentConfig = { temperature: 0.85, topP: 0.95, topK: 40, maxOutputTokens: 600 };
     return this.generateWithRetry(full, configGen, false);
   }
 }

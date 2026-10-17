@@ -42,18 +42,29 @@ export class ContextBuilderService implements ContextBuilder {
     const minutes = Math.floor((remSec % 3600) / 60);
     const botAge = `${days} días, ${hours} horas y ${minutes} minutos`;
 
-    const usersToLoad = new Set<string>(ctx.activeUserIds ?? []);
+    // Menciones en el texto (<@id>) siempre cargan perfil completo y cola cruda.
+    const mentioned = [...ctx.userText.matchAll(/<@!?(\\d+)>/g)].map((m) => m[1]);
+    // Ahorro de tokens: máximo 8 perfiles de usuarios activos; el hablante y los
+    // mencionados entran siempre.
+    const usersToLoad = new Set<string>([...(ctx.activeUserIds ?? []).slice(0, 8), ...mentioned]);
     usersToLoad.add(String(ctx.userId));
     let profilesText = '';
+    // La cola cruda ("MEMORIA RECIENTE") sólo viaja para el hablante y los
+    // mencionados; el resto de activos carga sólo su resumen.
+    const withRawQueue = new Set<string>([String(ctx.userId), ...mentioned]);
     for (const uid of usersToLoad) {
-      const summary = await this.memory.getMemorySummary(uid);
-      if (summary.trim()) profilesText += `--- PERFIL DE USUARIO ID ${uid} ---\n${summary}\n`;
+      const text = withRawQueue.has(uid)
+        ? await this.memory.getMemorySummary(uid)
+        : (await this.memory.getMemory(uid)).summary;
+      if (text?.trim()) profilesText += `--- PERFIL DE USUARIO ID ${uid} ---\n${text}\n`;
     }
 
     const fixedContent = `${systemPrompt}\n${currentTime}\n${botAge}\n${profilesText}\nUsuario: ${ctx.userName}\n${ctx.userText}`;
     const fixedSize = fixedContent.length;
     let availableForHistory = MAX_TOTAL_CHARS - fixedSize - 5000;
-    let historyText = ctx.contextMessages.join('\n');
+    // Recorte por mensajes ANTES del presupuesto de caracteres.
+    const maxHistory = this.config.get<number>('max_history_messages', 20);
+    let historyText = ctx.contextMessages.slice(-maxHistory).join('\n');
     if (historyText.length > availableForHistory) {
       if (availableForHistory <= 0) {
         historyText = '';
