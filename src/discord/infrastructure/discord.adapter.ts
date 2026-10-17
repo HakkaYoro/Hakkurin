@@ -10,6 +10,7 @@ import {
   Partials,
   PresenceUpdateStatus,
   type Message,
+  type VoiceState,
 } from 'discord.js';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { ConfigService } from '../../common/config.service';
@@ -28,15 +29,20 @@ import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort, SendOptions } from '../domain/ports/message-transport.port';
 import { BotLifecycle } from '../../web/application/ports/bot-lifecycle.port';
+import type { BotStatus } from '../../web/application/ports/bot-lifecycle.port';
 
 @Injectable()
 export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTransportPort, BotStatePort, BotLifecycle {
   private readonly logger = new Logger(DiscordAdapter.name);
   private client: Client | null = null;
+  private loginRun = 0;
+  private notReadyChecks = 0;
+  private lastDisconnectAt: number | null = null;
 
   private readonly pending = new Map<string, AbortController>();
   private readonly typingUsers = new Map<string, Set<string>>();
   private lastActiveChannelId: string | null = null;
+  private readonly deafTimers = new Map<string, NodeJS.Timeout>();
   // @Interval usa setInterval crudo (no espera al async): una iteración >60s (LLM)
   // dispararía una 2ª concurrente → doble entrega.
   private remindersRunning = false;
@@ -63,16 +69,13 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
   }
 
   async onModuleDestroy(): Promise<void> {
+    for (const t of this.deafTimers.values()) clearTimeout(t);
+    this.deafTimers.clear();
     await this.client?.destroy();
   }
 
-  async start(): Promise<void> {
-    const token = this.config.get<string>('bot_token');
-    if (!token) {
-      this.logger.warn('Sin bot_token en config. Discord no arranca.');
-      return;
-    }
-    this.client = new Client({
+  private createClient(): Client {
+    return new Client({
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -85,11 +88,35 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
       ],
       partials: [Partials.Channel, Partials.Message],
     });
-    this.bindEvents();
-    try {
-      await this.client.login(token);
-    } catch (e) {
-      this.logger.error(`Login Discord falló: ${(e as Error).message}`);
+  }
+
+  // Reintento indefinido: sin internet al arrancar ya no deja al bot muerto.
+  async start(): Promise<void> {
+    const run = ++this.loginRun;
+    let backoffMs = 30_000;
+    for (;;) {
+      if (run !== this.loginRun) return;
+      const token = this.config.get<string>('bot_token');
+      if (!token) {
+        this.logger.warn('Sin bot_token en config. Discord no arranca.');
+        return;
+      }
+      const client = this.createClient();
+      this.client = client;
+      this.bindEvents();
+      try {
+        await client.login(token);
+        return;
+      } catch (e) {
+        this.logger.error(
+          `Login Discord falló: ${(e as Error).message}. Reintentando en ${Math.round(backoffMs / 1000)}s.`,
+        );
+        await client.destroy().catch(() => {});
+        this.client = null;
+        if (run !== this.loginRun) return;
+        await delay(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 300_000);
+      }
     }
   }
 
@@ -118,6 +145,15 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
       );
     });
     c.on(Events.Error, (e) => this.logger.error(`Client error: ${e.message}`));
+    c.on(Events.ShardDisconnect, (event, id) => {
+      this.lastDisconnectAt = Date.now();
+      this.logger.warn(`Shard ${id} desconectado (code ${event.code}).`);
+    });
+    c.on(Events.ShardReconnecting, (id) => this.logger.log(`Shard ${id} reconectando...`));
+    c.on(Events.ShardResume, (id, replayed) =>
+      this.logger.log(`Shard ${id} resumido (${replayed} eventos reaplicados).`),
+    );
+    c.on(Events.VoiceStateUpdate, (oldS, newS) => this.onVoiceStateUpdate(oldS, newS));
   }
 
   private async onReady(): Promise<void> {
@@ -407,6 +443,84 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
 
   getBotUserId(): string | null {
     return this.client?.user?.id ?? null;
+  }
+
+  getStatus(): BotStatus {
+    const readyTs = this.client?.readyTimestamp ?? null;
+    return {
+      connected: !!this.client?.isReady(),
+      uptimeS: Math.floor(process.uptime()),
+      readySince: readyTs ? new Date(readyTs).toISOString() : null,
+      lastDisconnectAt: this.lastDisconnectAt
+        ? new Date(this.lastDisconnectAt).toISOString()
+        : null,
+    };
+  }
+
+  // El gateway puede quedar zombie tras un outage: discord.js se rinde y los loops
+  // quedan en no-op por el guard isReady(). 3 checks (~3 min) → recrear cliente.
+  @Interval(60000)
+  async connectionWatchdog(): Promise<void> {
+    if (this.client?.isReady()) {
+      this.notReadyChecks = 0;
+      return;
+    }
+    this.notReadyChecks++;
+    if (this.notReadyChecks < 3) return;
+    this.notReadyChecks = 0;
+    this.logger.warn('Watchdog: gateway sin estar ready ~3 min. Recreando cliente Discord...');
+    this.pending.clear();
+    await this.client?.destroy().catch(() => {});
+    this.client = null;
+    await this.start();
+  }
+
+  // Timer por usuario mientras esté autoensordecido en un VC que no sea el destino.
+  // Destensordearse, salir o llegar al destino lo cancela; cambiar de canal no lo reinicia.
+  private onVoiceStateUpdate(_oldS: VoiceState, cur: VoiceState): void {
+    const member = cur.member;
+    if (!member || member.user.bot) return;
+
+    const target = this.config.get<string>('deafen_move_channel_id', '');
+    const enabled = this.config.get<boolean>('deafen_move_enabled', false);
+    const keepEpisode =
+      enabled && !!target && !!cur.channelId && cur.selfDeaf && cur.channelId !== target;
+    const existing = this.deafTimers.get(cur.id);
+    if (!keepEpisode) {
+      if (existing) {
+        clearTimeout(existing);
+        this.deafTimers.delete(cur.id);
+      }
+      return;
+    }
+    if (existing) return;
+
+    const minutes = this.config.get<number>('deafen_move_minutes', 3);
+    const timer = setTimeout(() => {
+      this.deafTimers.delete(cur.id);
+      void this.moveDeafenedMember(cur.id, cur.guild.id, target, minutes);
+    }, minutes * 60_000);
+    this.deafTimers.set(cur.id, timer);
+  }
+
+  private async moveDeafenedMember(
+    userId: string,
+    guildId: string,
+    targetChannelId: string,
+    minutes: number,
+  ): Promise<void> {
+    try {
+      const guild = this.client?.guilds.cache.get(guildId);
+      const member =
+        guild?.members.cache.get(userId) ??
+        (await guild?.members.fetch(userId).catch(() => null));
+      const voice = member?.voice;
+      if (!voice?.channelId || !voice.selfDeaf || voice.channelId === targetChannelId) return;
+      await voice.setChannel(targetChannelId);
+      this.logger.log(`${member.user.displayName} movido por ensordecido >${minutes} min.`);
+    } catch (e) {
+      this.logger.warn(`No pude mover a ${userId} por ensordecido: ${(e as Error).message}`);
+    }
   }
 
   @Interval(60000)

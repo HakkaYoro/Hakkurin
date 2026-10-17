@@ -20,6 +20,9 @@ export interface HakkurinConfig {
   webui_token?: string;
   debug_dm?: boolean;
   ytdl_sidecar_url?: string;
+  deafen_move_enabled?: boolean;
+  deafen_move_channel_id?: string;
+  deafen_move_minutes?: number;
   [key: string]: any;
 }
 
@@ -32,6 +35,7 @@ const DEFAULTS: HakkurinConfig = {
     'Eres Hakkurin, una chica usuaria de Discord con una personalidad e-girl, otaku y fujoshi. Te gusta el anime, el manga y usar emoticonos. Eres sarcástica pero amigable si te tratan bien. Si te ignoran, dejas de hablar. Tienes memoria de con quién hablas.',
   reply_probability: 0.125,
   developer_id: '321799812595056645',
+  deafen_move_minutes: 3,
 };
 
 @Injectable()

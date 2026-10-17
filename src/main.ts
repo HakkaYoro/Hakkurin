@@ -19,6 +19,14 @@ async function bootstrap() {
   const logTee = app.get(LogTeeService);
   app.useLogger(logTee);
 
+  // Un handler registrado suprime el crash por defecto de Node ≥15.
+  process.on('unhandledRejection', (reason) => {
+    logTee.error(`unhandledRejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`);
+  });
+  process.on('uncaughtException', (err) => {
+    logTee.error(`uncaughtException: ${err.stack ?? err.message}`);
+  });
+
   // El pacer de 20ms de voz vive en este event-loop: percentiles cada 30s para
   // correlacionar micro-cortes de audio.
   const loop = monitorEventLoopDelay({ resolution: 10 });
