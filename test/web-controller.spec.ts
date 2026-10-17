@@ -10,7 +10,11 @@ import { BOT_SELF_ID } from '../src/memory/application/memory.service';
 // memories y restart. AuthGuard/ViewService ya tienen su spec en web.spec.ts.
 
 class MockConfig extends ConfigService {
-  store: Record<string, any> = { bot_token: 'viejo', gemini_keys: ['k0'] };
+  store: Record<string, any> = {
+    bot_token: 'viejo',
+    gemini_keys: ['k0'],
+    webui_token: 'secreto-ui',
+  };
   async load() {}
   async save() {}
   get<T = any>(key: string, d?: T): T {
@@ -29,24 +33,67 @@ function makeController() {
   const config = new MockConfig();
   const cryptoSvc = new CryptoAdapter();
   const memory = new MemoryService(cryptoSvc, new MemoryRepositoryAdapter(cryptoSvc), new MemoryQueueAdapter());
-  const discord = { forceShutdownAndSummarize: vi.fn(async () => {}), restart: vi.fn(async () => {}) } as any;
+  const discord = {
+    forceShutdownAndSummarize: vi.fn(async () => {}),
+    restart: vi.fn(async () => {}),
+    getStatus: vi.fn(() => ({ connected: true, uptimeS: 60, readySince: null, lastDisconnectAt: null })),
+  } as any;
   const brain = { reloadConfig: vi.fn(async () => {}) } as any;
   const view = { render: vi.fn(async () => '<html>ok</html>') } as any;
   const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarAdapter] falló') } as any;
-  const ctl = new WebController(config, memory, discord, brain, view, logTee);
-  return { ctl, config, memory, discord, brain, view, logTee };
+  const stats = {
+    snapshot: vi.fn(() => [
+      { day: '2026-10-16', messages: 3, aiCalls: { analyze: 2 }, tokensIn: 10, tokensOut: 4, tokensCached: 1 },
+    ]),
+  } as any;
+  const ctl = new WebController(config, memory, discord, brain, view, logTee, stats);
+  return { ctl, config, memory, discord, brain, view, logTee, stats };
 }
 
 describe('WebController — root', () => {
-  it('renderiza index con flags write-only (sin echo del token/password)', async () => {
+  it('renderiza index con flags write-only (sin echo de ningún secreto)', async () => {
     const { ctl, view } = makeController();
     const out = await ctl.root();
     expect(out).toBe('<html>ok</html>');
     const args = view.render.mock.calls[0][1];
     expect(args.has_bot_token).toBe(true);
+    expect(args.has_webui_token).toBe(true);
     expect(args.gemini_keys_count).toBe(1);
+    expect(args.allowed_channels).toBe('');
+    expect(args.bot.connected).toBe(true);
+    expect(args.stats).toHaveLength(1);
     expect(JSON.stringify(args)).not.toContain('viejo'); // el token jamás sale al DOM
+    expect(JSON.stringify(args)).not.toContain('secreto-ui'); // webui_token tampoco
     expect(args.navidrome_base_url ?? '').toBe('');
+  });
+});
+
+describe('WebController — status', () => {
+  it('GET /status: sólo flags/contadores, jamás valores de secretos', async () => {
+    const { ctl, config } = makeController();
+    config.store = {
+      bot_token: 'tokensecreto',
+      gemini_keys: ['k0', 'k1'],
+      webui_token: 'secreto-ui',
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'sk-secreta',
+      openrouter_chat_model: 'anthropic/claude-x',
+    };
+    const s = ctl.status();
+    expect(s.provider).toBe('openrouter');
+    expect(s.chatModel).toBe('anthropic/claude-x');
+    expect(s.geminiKeysCount).toBe(2);
+    expect(s.openrouterConfigured).toBe(true);
+    expect(s.bot.connected).toBe(true);
+    const json = JSON.stringify(s);
+    expect(json).not.toContain('tokensecreto');
+    expect(json).not.toContain('sk-secreta');
+    expect(json).not.toContain('secreto-ui');
+  });
+
+  it('sin chat_model de OpenRouter → openrouterConfigured false', async () => {
+    const { ctl } = makeController();
+    expect(ctl.status().openrouterConfigured).toBe(false);
   });
 });
 
@@ -76,6 +123,36 @@ describe('WebController — update_config', () => {
     await ctl.updateConfig({ reply_probability: 'no-soy-número', gemini_keys: '   ' } as any);
     expect(brain.reloadConfig).not.toHaveBeenCalled();
     expect(config.store.reply_probability).toBeUndefined();
+  });
+
+  it('checkbox deafen: "on" → true; ausente → false', async () => {
+    const { ctl, config } = makeController();
+    config.store.deafen_move_enabled = true;
+    await ctl.updateConfig({ max_history_messages: '30', deafen_move_minutes: '5' } as any);
+    expect(config.store.deafen_move_enabled).toBe(false);
+    expect(config.store.max_history_messages).toBe(30);
+    expect(config.store.deafen_move_minutes).toBe(5);
+    await ctl.updateConfig({ deafen_move_enabled: 'on' } as any);
+    expect(config.store.deafen_move_enabled).toBe(true);
+  });
+
+  it('allowed_channels: textarea multilínea → array limpio', async () => {
+    const { ctl, config } = makeController();
+    await ctl.updateConfig({ allowed_channels: ' a\nb \n\nc ' } as any);
+    expect(config.store.allowed_channels).toEqual(['a', 'b', 'c']);
+  });
+
+  it('openrouter_api_key sólo si viene rellena; key/modelo → reload; ai_provider NO', async () => {
+    const { ctl, config, brain } = makeController();
+    config.store.openrouter_api_key = 'sk-vieja';
+    await ctl.updateConfig({ ai_provider: 'openrouter', openrouter_api_key: '   ' } as any);
+    expect(config.store.openrouter_api_key).toBe('sk-vieja'); // write-only respetado
+    expect(brain.reloadConfig).not.toHaveBeenCalled(); // cambiar ai_provider no recarga
+    await ctl.updateConfig({ openrouter_chat_model: 'x' } as any);
+    expect(brain.reloadConfig).toHaveBeenCalledTimes(1);
+    await ctl.updateConfig({ openrouter_api_key: 'sk-nueva', openrouter_memory_model: 'y' } as any);
+    expect(config.store.openrouter_api_key).toBe('sk-nueva');
+    expect(brain.reloadConfig).toHaveBeenCalledTimes(2);
   });
 });
 

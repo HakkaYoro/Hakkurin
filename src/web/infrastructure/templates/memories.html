@@ -1,36 +1,32 @@
 {% extends '_base.html' %}
 {% block title %}Memorias - Hakkurin{% endblock %}
 {% block body %}
-<a href="/" class="back-btn">← Volver al Dashboard</a>
-<h1>Memorias de Usuarios 🧠</h1>
+<h1>Memorias de usuarios</h1>
 
-<div style="margin-bottom: 20px; text-align: right;">
-    <form action="/memories/delete_all" method="post" onsubmit="return confirm('¿Estás seguro de que deseas eliminar TODAS las memorias? Esto no se puede deshacer.');" style="display: inline;">
-        <button type="submit" style="background: #ff5555; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⚠️ Borrar Todas las Memorias</button>
+<div class="row-end">
+    <form action="/memories/delete_all" method="post"
+        onsubmit="return confirm('¿Eliminar TODAS las memorias? Esto no se puede deshacer.');">
+        <button type="submit" class="btn-danger">Borrar todas las memorias</button>
     </form>
 </div>
 
 {% if not memories.length %}
-<p style="text-align: center; color: #888;">No hay memorias guardadas aún.</p>
+<p class="muted">No hay memorias guardadas aún.</p>
 {% else %}
 <ul class="memory-list">
     {% for mem in memories %}
-    <li style="position: relative;">
-        <a href="/memories/{{ mem.user_id }}">
-            <div class="memory-item{% if mem.is_self %} internal-memory{% endif %}">
-                <span class="user-id">
-                    ID: {{ mem.user_id }}
-                    {% if mem.is_self %}
-                    <span style="background: #ff79c6; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; margin-left: 10px;">🧠
-                        MEMORIA INTERNA</span>
-                    {% endif %}
-                </span>
-                <span class="date">Actualizado: {{ mem.date }}</span>
-            </div>
-        </a>
-        <form action="/memories/{{ mem.user_id }}/delete" method="post" onsubmit="return confirm('¿Borrar la memoria de {{ mem.user_id }}?');" style="display: inline; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);">
-            <button type="submit" style="background: #ff5555; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Borrar memoria">🗑️</button>
-        </form>
+    <li>
+        <div class="memory-item{% if mem.is_self %} internal-memory{% endif %}">
+            <a href="/memories/{{ mem.user_id }}" class="memory-link">
+                <strong>{{ mem.user_id }}</strong>
+                {% if mem.is_self %}<span class="chip">MEMORIA INTERNA</span>{% endif %}
+                <div class="hint">Actualizado: {{ mem.date }}</div>
+            </a>
+            <form action="/memories/{{ mem.user_id }}/delete" method="post"
+                onsubmit="return confirm('¿Borrar la memoria de {{ mem.user_id }}?');">
+                <button type="submit" class="btn-danger btn-sm" title="Borrar memoria">Borrar</button>
+            </form>
+        </div>
     </li>
     {% endfor %}
 </ul>
