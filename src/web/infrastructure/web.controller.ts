@@ -85,6 +85,9 @@ export class WebController {
     }
     // checkbox: el formulario sólo envía 'on' si está marcado; ausente → false.
     await this.config.set('deafen_move_enabled', Boolean(body.deafen_move_enabled));
+    if (body.ai_provider === 'gemini' || body.ai_provider === 'openrouter') {
+      await this.config.set('ai_provider', body.ai_provider);
+    }
     for (const key of [
       'navidrome_base_url', 'navidrome_external_url', 'navidrome_username', 'ytdl_sidecar_url',
       'deafen_move_channel_id',

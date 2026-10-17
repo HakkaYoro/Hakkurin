@@ -147,12 +147,24 @@ describe('WebController — update_config', () => {
     config.store.openrouter_api_key = 'sk-vieja';
     await ctl.updateConfig({ ai_provider: 'openrouter', openrouter_api_key: '   ' } as any);
     expect(config.store.openrouter_api_key).toBe('sk-vieja'); // write-only respetado
+    expect(config.store.ai_provider).toBe('openrouter'); // se persiste sin reload
     expect(brain.reloadConfig).not.toHaveBeenCalled(); // cambiar ai_provider no recarga
     await ctl.updateConfig({ openrouter_chat_model: 'x' } as any);
     expect(brain.reloadConfig).toHaveBeenCalledTimes(1);
     await ctl.updateConfig({ openrouter_api_key: 'sk-nueva', openrouter_memory_model: 'y' } as any);
     expect(config.store.openrouter_api_key).toBe('sk-nueva');
     expect(brain.reloadConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('ai_provider: valor inválido se ignora; ausente no toca el actual', async () => {
+    const { ctl, config } = makeController();
+    config.store.ai_provider = 'gemini';
+    await ctl.updateConfig({ ai_provider: 'malware' } as any);
+    expect(config.store.ai_provider).toBe('gemini');
+    await ctl.updateConfig({ bot_name: 'n' } as any);
+    expect(config.store.ai_provider).toBe('gemini');
+    await ctl.updateConfig({ ai_provider: 'gemini' } as any);
+    expect(config.store.ai_provider).toBe('gemini');
   });
 });
 
