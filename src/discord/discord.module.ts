@@ -11,6 +11,7 @@ import { UrlEnricherAdapter } from './infrastructure/url-enricher.adapter';
 import { HolidayStoreAdapter } from './infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from './infrastructure/persistence/sleep-store.adapter';
 import { ActionParserService } from './application/action-parser.service';
+import { TranslateService } from './application/translate.service';
 import { ConversationModule } from '../conversation/conversation.module';
 import { MemoryModule } from '../memory/memory.module';
 import { AiModule } from '../ai/ai.module';
@@ -36,6 +37,7 @@ import { UrlEnricherPort } from './domain/ports/url-enricher.port';
     SlashCommandsService,
     MusicUiService,
     ActionParserService,
+    TranslateService,
     DiscordAdapter,
     { provide: MessageTransportPort, useExisting: DiscordAdapter },
     { provide: BotStatePort, useExisting: DiscordAdapter },

@@ -9,6 +9,7 @@ import { ConversationService } from '../src/conversation/application/conversatio
 import { StealthDmService } from '../src/discord/application/stealth-dm.service';
 import { SleepService } from '../src/discord/application/sleep.service';
 import { ActionParserService } from '../src/discord/application/action-parser.service';
+import { TranslateService } from '../src/discord/application/translate.service';
 import { ConfigService } from '../src/common/config.service';
 import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.adapter';
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
@@ -126,6 +127,8 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   );
   const reminders = new ReminderService(memory, brain, parser, transport);
   const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());
+  const stats = { bumpMessages: vi.fn(), bumpAiCall: vi.fn(), addTokens: vi.fn() } as any;
+  const translate = new TranslateService(brain, config, stats);
   const svc = new DiscordAdapter(
     config, conversation, brain, memory,
     stealthDm, sleep,
@@ -133,9 +136,10 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
     { handle: vi.fn(async () => {}), register: vi.fn(async () => {}) } as any,
     parser,
     smartResponse, reminders, holidays,
+    stats, translate,
   );
   ref.svc = svc;
-  return { svc, config, memory, conversation, brain, holidays, client: makeClient() };
+  return { svc, config, memory, conversation, brain, holidays, stats, translate, client: makeClient() };
 }
 
 function fakeMsg(over: Record<string, any> = {}): any {
@@ -527,5 +531,51 @@ describe('DiscordAdapter — festividades', () => {
     await memory.saveMemory('51', { last_channel_id: null } as any); // sin canal
     await holidays.celebrateHoliday('Año Nuevo');
     expect(brain.generateHolidayGreeting).not.toHaveBeenCalled();
+  });
+});
+
+describe('DiscordAdapter — reacción 🌐', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('traduce una vez, responde citando el mensaje y el dedupe evita repetición', async () => {
+    const { svc, brain, translate, stats, client } = makeService();
+    (svc as any).client = client;
+    brain.generateResponse = vi.fn(async () => 'hello world');
+    const channel = { isTextBased: () => true, send: vi.fn(async () => {}) };
+    client.channels.cache.set('c1', channel);
+    const msg = fakeMsg({ content: 'hola mundo' });
+    const reaction = { emoji: { name: '🌐' }, message: { fetch: vi.fn(async () => msg) } } as any;
+    const user = { bot: false } as any;
+
+    await (svc as any).onTranslateReaction(reaction, user);
+
+    expect(brain.generateResponse).toHaveBeenCalledTimes(1);
+    expect(stats.bumpAiCall).toHaveBeenCalledWith('translate');
+    expect(channel.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: '🌐 hello world',
+        messageReference: { messageId: 'm1', channelId: 'c1' },
+      }),
+    );
+    expect(translate.shouldTranslate('m1')).toBe(false); // consumido por la reacción
+
+    await (svc as any).onTranslateReaction(reaction, user);
+    expect(brain.generateResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('bot autor, emoji distinto o mensaje sin texto → no-op sin gastar IA', async () => {
+    const { svc, brain } = makeService();
+    (svc as any).client = makeClient();
+    const user = { bot: false } as any;
+    const reactionWith = (emoji: string, content: string) =>
+      ({
+        emoji: { name: emoji },
+        message: { fetch: vi.fn(async () => fakeMsg({ content })) },
+      }) as any;
+
+    await (svc as any).onTranslateReaction(reactionWith('🌐', 'hola'), { bot: true } as any);
+    await (svc as any).onTranslateReaction(reactionWith('👍', 'hola'), user);
+    await (svc as any).onTranslateReaction(reactionWith('🌐', '   '), user);
+    expect(brain.generateResponse).not.toHaveBeenCalled();
   });
 });

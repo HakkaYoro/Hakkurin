@@ -10,6 +10,10 @@ import {
   Partials,
   PresenceUpdateStatus,
   type Message,
+  type MessageReaction,
+  type PartialMessageReaction,
+  type PartialUser,
+  type User,
   type VoiceState,
 } from 'discord.js';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
@@ -25,6 +29,8 @@ import { delay, sleepMs } from '../../common/util';
 import { ABORTED, SmartResponseService } from '../application/smart-response.service';
 import { ReminderService } from '../application/reminder.service';
 import { HolidayService } from '../application/holiday.service';
+import { TranslateService } from '../application/translate.service';
+import { StatsService } from '../../stats/stats.service';
 import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort, SendOptions } from '../domain/ports/message-transport.port';
@@ -62,6 +68,8 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     private readonly smartResponse: SmartResponseService,
     private readonly reminders: ReminderService,
     private readonly holidays: HolidayService,
+    private readonly stats: StatsService,
+    private readonly translate: TranslateService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -80,6 +88,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.GuildMessageTyping,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildVoiceStates, // sin este intent member.voice.channel es siempre null
@@ -154,6 +163,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
       this.logger.log(`Shard ${id} resumido (${replayed} eventos reaplicados).`),
     );
     c.on(Events.VoiceStateUpdate, (oldS, newS) => this.onVoiceStateUpdate(oldS, newS));
+    c.on(Events.MessageReactionAdd, (r, u) => void this.onTranslateReaction(r, u));
   }
 
   private async onReady(): Promise<void> {
@@ -219,6 +229,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
   private async onMessage(message: Message): Promise<void> {
     if (!message.author || message.author.bot) return;
     if (!message.channel) return;
+    this.stats.bumpMessages();
     const channelId = message.channel.id;
     const userId = message.author.id;
 
@@ -268,6 +279,28 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     const controller = new AbortController();
     this.pending.set(key, controller);
     void this.processWithDebounce(message, controller, key);
+  }
+
+  // reaction.message puede ser PartialMessage (contenido vacío) → re-fetch.
+  private async onTranslateReaction(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: User | PartialUser,
+  ): Promise<void> {
+    try {
+      if (user.bot || reaction.emoji.name !== '🌐') return;
+      const msg = await reaction.message.fetch().catch(() => null);
+      const content = msg?.content?.trim();
+      if (!msg || !content) return;
+      if (!this.translate.shouldTranslate(msg.id)) return;
+      const translated = await this.translate.translate(content);
+      // null ya avisó por warn en TranslateService.
+      if (!translated) return;
+      await this.sendToChannel(msg.channel.id, `🌐 ${translated}`, {
+        replyTo: { messageId: msg.id, channelId: msg.channel.id },
+      });
+    } catch (e) {
+      this.logger.warn(`Traducción 🌐: ${(e as Error).message}`);
+    }
   }
 
   // Sólo caché (sin fetch): replies a mensajes no cacheados no cuentan como is_reply.
