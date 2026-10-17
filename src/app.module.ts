@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule } from './common/config.module';
+import { StatsModule } from './stats/stats.module';
 import { MemoryModule } from './memory/memory.module';
 import { AiModule } from './ai/ai.module';
 import { ConversationModule } from './conversation/conversation.module';
@@ -16,6 +17,7 @@ import { WebModule } from './web/web.module';
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     ConfigModule,
+    StatsModule,
     MemoryModule,
     AiModule,
     ConversationModule,
