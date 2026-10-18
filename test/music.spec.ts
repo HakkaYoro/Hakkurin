@@ -20,6 +20,9 @@ vi.mock('child_process', async () => {
       proc.stdout = new PassThrough();
       proc.stderr = new PassThrough();
       proc.kill = v.fn();
+      proc.exitCode = null; proc.signalCode = null; // paridad Node: proceso vivo
+      // Node fija exitCode/signalCode al salir; el adapter los lee tras el pre-buffer.
+      proc.on('exit', (code: number) => { proc.exitCode = code; proc.signalCode = null; });
       return proc;
     }),
   };
@@ -597,6 +600,31 @@ describe('FfmpegAdapter — contrato createAndPlay/killCurrent (spawn fake)', ()
     const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
     expect(await adapter.createAndPlay(s, '', player)).toBe(false);
     expect(s.ffmpeg).toBeNull();
+    expect(player.play).not.toHaveBeenCalled();
+  });
+
+  it('exit natural 0 durante el pre-buffer → la pista entera en buf se reproduce', async () => {
+    const adapter = new FfmpegAdapter();
+    const s: any = { ffmpeg: null };
+    const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+    const p = adapter.createAndPlay(s, 'http://127.0.0.1:9/x', player);
+    const ff = s.ffmpeg;
+    ff.emit('exit', 0);
+    expect(s.ffmpeg).toBeNull(); // el handler del adapter lo desregistra
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(await p).toBe(true);
+    expect(player.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('exit natural 1 durante el pre-buffer → fuente rota: false y sin play', async () => {
+    const adapter = new FfmpegAdapter();
+    const s: any = { ffmpeg: null };
+    const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+    const p = adapter.createAndPlay(s, 'http://127.0.0.1:9/x', player);
+    const ff = s.ffmpeg;
+    ff.emit('exit', 1);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(await p).toBe(false);
     expect(player.play).not.toHaveBeenCalled();
   });
 });

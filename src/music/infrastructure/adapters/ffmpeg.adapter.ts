@@ -74,16 +74,21 @@ export class FfmpegAdapter implements AudioPipeline {
     // Abortado (/stop o skip) durante el pre-buffer: killCurrent ya pisó s.ffmpeg.
     // Sin este chequeo el play dispararía audio muerto sobre una sesión cancelada.
     if (s.ffmpeg !== ff) {
-      // Salida temprana por cuenta de ffmpeg (un /stop lo mata con SIGKILL y no
-      // entra aquí): la causa sólo existe en su stderr, invisible al nivel de prod.
-      if (ff.exitCode !== null || ff.signalCode === null) {
+      // killCurrent (stop/skip) deja exitCode=null: eso sí es aborto. Un exit
+      // NATURAL no lo es — con LAN ~130x una pista corta se transcodea ENTERA
+      // dentro del pre-buffer: exit=0 → el audio completo ya está en buf.
+      const natural = ff.exitCode !== null;
+      const failed = natural && ff.exitCode !== 0;
+      if (failed) {
         // bytes=0 delata fuente que no entregó nada; len descarta URL truncada.
         this.logger.warn(
-          `ffmpeg murió antes del play (exit=${ff.exitCode ?? ff.signalCode ?? 'spawn-fallido'}, bytes=${outBytes}, len=${streamUrl.length}): ${stderrTail.trim() || 'sin stderr'}`,
+          `ffmpeg murió antes del play (exit=${ff.exitCode}, bytes=${outBytes}, len=${streamUrl.length}): ${stderrTail.trim() || 'sin stderr'}`,
         );
       }
-      try { ff.kill('SIGKILL'); } catch {}
-      return false;
+      if (!natural || failed) {
+        try { ff.kill('SIGKILL'); } catch {}
+        return false;
+      }
     }
     player.play(createAudioResource(buf, { inputType: StreamType.OggOpus, inlineVolume: false }));
     return true;
