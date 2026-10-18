@@ -154,5 +154,46 @@ describe('ConversationService (sesiones + contexto de canal)', () => {
       await svc.checkTimeouts(async () => {});
       expect(svc.hasActiveSession()).toBe(true); // sigue activa
     });
+
+    it('canal que se queda sin sesiones activas → contexto reiniciado (historial vacío)', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.5); // timeout silencioso
+      const brain: any = { analyzeInteraction: vi.fn() };
+      const svc = makeWithBrain(brain);
+      const s = svc.createOrUpdateSession('c1', 'u1', 'Alice', 'hola');
+      s.isActive = true;
+      (s as any).lastInteraction = Math.floor(Date.now() / 1000) - 400;
+      const ctxBefore = svc.getChannelContext('c1');
+      expect(ctxBefore.getFormattedHistory()).toHaveLength(1);
+      await svc.checkTimeouts(async () => {});
+      const ctxAfter = svc.getChannelContext('c1');
+      expect(ctxAfter).not.toBe(ctxBefore);
+      expect(ctxAfter.getFormattedHistory()).toEqual([]);
+      vi.restoreAllMocks();
+    });
+
+    it('si otro usuario sigue activo en el canal, el contexto no se limpia', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      const brain: any = { analyzeInteraction: vi.fn() };
+      const svc = makeWithBrain(brain);
+      const old = svc.createOrUpdateSession('c1', 'u1', 'Alice', 'hola');
+      old.isActive = true;
+      (old as any).lastInteraction = Math.floor(Date.now() / 1000) - 400;
+      svc.createOrUpdateSession('c1', 'u2', 'Bob', 'aún aquí').isActive = true;
+      const ctxBefore = svc.getChannelContext('c1');
+      await svc.checkTimeouts(async () => {});
+      expect(svc.getChannelContext('c1')).toBe(ctxBefore);
+      expect(svc.getChannelContext('c1').getFormattedHistory()).toHaveLength(2);
+      vi.restoreAllMocks();
+    });
+
+    it('sesiones nunca activadas expiran a los 10 min (fuga de RAM)', async () => {
+      const brain: any = { analyzeInteraction: vi.fn() };
+      const svc = makeWithBrain(brain);
+      const stale = svc.createOrUpdateSession('c1', 'u1', 'Alice', 'sin gate');
+      (stale as any).lastInteraction = Math.floor(Date.now() / 1000) - 700; // > 10 min
+      svc.createOrUpdateSession('c1', 'u2', 'Bob', 'reciente');
+      await svc.checkTimeouts(async () => {});
+      expect(svc.createOrUpdateSession('c1', 'u1', 'Alice', 'x')).not.toBe(stale);
+    });
   });
 });

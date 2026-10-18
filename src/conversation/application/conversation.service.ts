@@ -76,7 +76,11 @@ export class ConversationService {
     const now = nowSec();
     const expired: string[] = [];
     for (const [k, session] of this.sessions) {
-      if (!session.isActive) continue;
+      if (!session.isActive) {
+        // Nunca activada: sin esto se acumularían para siempre (fuga de RAM).
+        if (now - session.lastInteraction > SESSION_TIMEOUT_S * 2) this.sessions.delete(k);
+        continue;
+      }
       if (now - session.lastInteraction <= SESSION_TIMEOUT_S) continue;
 
       if (Math.random() > 0.125) {
@@ -112,6 +116,19 @@ export class ConversationService {
     for (const k of expired) {
       const [channelId, userId] = k.split(':');
       this.endSession(channelId, userId);
+    }
+    this.resetIdleChannels(expired);
+  }
+
+  /** Sin sesiones activas en el canal, fuera el contexto: si no, el historial
+   *  (1h/50) volvería a viajar en cada llamada tras horas de silencio — la
+   *  continuidad la llevan las memorias, no el historial crudo. */
+  private resetIdleChannels(expired: string[]): void {
+    for (const channelId of new Set(expired.map((k) => k.split(':')[0]))) {
+      const stillActive = [...this.sessions.values()].some(
+        (s) => s.channelId === channelId && s.isActive,
+      );
+      if (!stillActive) this.channels.delete(channelId);
     }
   }
 }
