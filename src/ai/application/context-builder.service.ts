@@ -95,6 +95,7 @@ export class ContextBuilderService implements ContextBuilder {
       userId: ctx.userId,
       userText: ctx.userText,
       hasImage: !!ctx.imageData,
+      imageNote: ctx.imageNote ?? null,
       urlContext: ctx.urlContext,
     });
 

@@ -51,21 +51,44 @@ export class SmartResponseService {
     for (const id of message.mentionIds) activeUserIds.push(id);
 
     const channelCtx = this.conversation.getChannelContext(channelId);
-    for (const att of message.attachments) {
-      if (!IMAGE_EXT.test(att.name)) continue;
-      const data = await this.transport.fetchImage(att.url);
-      if (data) channelCtx.addImage(data, att.contentType || 'image/jpeg');
-      else this.logger.warn(`Error descargando imagen ${att.name}`);
+    const atts = [...message.attachments].reverse();
+    // El spam se evalúa sobre el último adjunto visual (contentType image/*: GIFs
+    // incluidos); la descarga/visión sigue limitada a raster (IMAGE_EXT).
+    const lastVisual = atts.find((a) => a.contentType?.startsWith('image/') || IMAGE_EXT.test(a.name));
+    const lastImageAtt = atts.find((a) => IMAGE_EXT.test(a.name));
+    // onMessage ya registró las imágenes del mensaje: la actual cuenta incluida.
+    // imageNote no null ⇔ spam: sustituye a la imagen en el prompt.
+    const spam = lastVisual ? channelCtx.assessImageSpam(lastVisual.url, userId) : null;
+    let imageData: Buffer | null = null;
+    let imageMime: string | null = null;
+    let imageNote: string | null = null;
+    if (spam && (spam.repeated || spam.burst)) {
+      // Ahorro de visión: ni descarga ni thumbnail, sólo la nota para el prompt.
+      imageNote = spam.repeated
+        ? 'El usuario acaba de reenviar la MISMA imagen que ya mandó hace poco. No has vuelto a recibirla.'
+        : `El usuario está mandando imágenes en ráfaga (${spam.burstCount} en el último minuto). No las has recibido.`;
+    } else if (lastImageAtt) {
+      const mime = lastImageAtt.contentType || 'image/jpeg';
+      const data = await this.transport.fetchImage(lastImageAtt.url);
+      if (data) {
+        channelCtx.addImage(data, mime);
+        imageData = data;
+        imageMime = mime;
+      } else this.logger.warn(`Error descargando imagen ${lastImageAtt.name}`);
     }
-    const recentImages = channelCtx.getRecentImages(60);
-    let imageData: Buffer | null = recentImages.length ? recentImages[recentImages.length - 1].data : null;
-    let imageMime: string | null = recentImages.length ? recentImages[recentImages.length - 1].mime : null;
+    if (!imageNote && !imageData) {
+      const recentImages = channelCtx.getRecentImages(60);
+      if (recentImages.length) {
+        imageData = recentImages[recentImages.length - 1].data;
+        imageMime = recentImages[recentImages.length - 1].mime;
+      }
+    }
 
     const currentPlaying = this.getNowPlaying(message);
 
     const urlCtx = await this.urlEnricher.enrich(userText);
     let urlContext = urlCtx.text;
-    if (!imageData && urlCtx.thumbnailData) {
+    if (!imageData && !imageNote && urlCtx.thumbnailData) {
       imageData = urlCtx.thumbnailData;
       imageMime = urlCtx.thumbnailMime;
     }
@@ -78,6 +101,7 @@ export class SmartResponseService {
       isSessionActive: true,
       imageData,
       imageMimeType: imageMime,
+      imageNote,
       activeUserIds,
       isDm,
       currentPlaying,

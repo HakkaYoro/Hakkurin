@@ -1,4 +1,6 @@
+import { vi } from 'vitest';
 import { ConversationService } from '../src/conversation/application/conversation.service';
+import { SEEN_IMAGES_MAX } from '../src/conversation/domain/entities/channel-context.entity';
 
 // Sesiones + contexto de canal: las partes sin dependencias (brain/memory) se
 // prueban directamente con mocks vacíos. check_timeouts depende del brain y se
@@ -78,6 +80,58 @@ describe('ConversationService (sesiones + contexto de canal)', () => {
     const s = svc.createOrUpdateSession('c1', 'u1');
     s.isActive = true;
     expect(svc.hasActiveSession()).toBe(true);
+  });
+
+  describe('anti-spam de imágenes', () => {
+    it('misma url+autor en <120s → repeated; otro autor misma url → no', () => {
+      const svc = makeService();
+      const ctx = svc.getChannelContext('c1');
+      ctx.noteImage('http://x/a.png', 'u1');
+      expect(ctx.assessImageSpam('http://x/a.png', 'u1')).toEqual({
+        repeated: false, burst: false, burstCount: 1,
+      });
+      ctx.noteImage('http://x/a.png', 'u1');
+      expect(ctx.assessImageSpam('http://x/a.png', 'u1').repeated).toBe(true);
+      // u2 manda la misma url por primera vez: para él no es repetida.
+      ctx.noteImage('http://x/a.png', 'u2');
+      expect(ctx.assessImageSpam('http://x/a.png', 'u2').repeated).toBe(false);
+    });
+
+    it('ráfaga: 4 imágenes del mismo autor en 60s → burst con burstCount 4', () => {
+      const svc = makeService();
+      const ctx = svc.getChannelContext('c1');
+      for (let i = 0; i < 4; i++) ctx.noteImage(`http://x/${i}.png`, 'u1');
+      const r = ctx.assessImageSpam('http://x/3.png', 'u1');
+      expect(r.burstCount).toBe(4);
+      expect(r.burst).toBe(true);
+      // Otro autor no hereda la ráfaga.
+      ctx.noteImage('http://x/9.png', 'u2');
+      const r2 = ctx.assessImageSpam('http://x/9.png', 'u2');
+      expect(r2.burst).toBe(false);
+      expect(r2.burstCount).toBe(1);
+    });
+
+    it('caps: seenImages a SEEN_IMAGES_MAX y recentImages a 20', () => {
+      const svc = makeService();
+      const ctx = svc.getChannelContext('c1');
+      for (let i = 0; i < SEEN_IMAGES_MAX + 10; i++) ctx.noteImage(`http://x/${i}.png`, 'u1');
+      expect(ctx.seenImages).toHaveLength(SEEN_IMAGES_MAX);
+      for (let i = 0; i < 25; i++) ctx.addImage(Buffer.from('png'), 'image/png');
+      expect(ctx.recentImages).toHaveLength(20);
+    });
+
+    it('expira por ventana: tras >120s la misma url deja de ser repeated', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const svc = makeService();
+      const ctx = svc.getChannelContext('c1');
+      ctx.noteImage('http://x/a.png', 'u1');
+      ctx.noteImage('http://x/a.png', 'u1');
+      expect(ctx.assessImageSpam('http://x/a.png', 'u1').repeated).toBe(true);
+      vi.setSystemTime(new Date('2026-01-01T00:03:00Z')); // +180s
+      expect(ctx.assessImageSpam('http://x/a.png', 'u1').repeated).toBe(false);
+      vi.useRealTimers();
+    });
   });
 
   describe('checkTimeouts (con brain fake)', () => {

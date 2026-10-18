@@ -237,6 +237,13 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     const isDm = message.guild === null;
     if (!isDm && allowed.length > 0 && !allowed.includes(channelId)) return;
 
+    // Registro de imágenes para el anti-spam: corre antes de cualquier gate
+    // porque el spam sin mención también cuenta.
+    const channelCtx = this.conversation.getChannelContext(channelId);
+    for (const att of message.attachments.values()) {
+      if (att.contentType?.startsWith('image/')) channelCtx.noteImage(att.url, userId);
+    }
+
     // ponytail: !sync aún no existe como comando de sincronización; ignorarlo
     // evita gastar una llamada de IA.
     if (message.content.trim() === '!sync') return;
@@ -254,9 +261,7 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
     const isMentioned =
       !!this.client?.user && message.mentions.has(this.client.user);
     const isReply = this.isReplyToBot(message);
-    const isChannelEngaged = this.conversation
-      .getChannelContext(channelId)
-      .isBotEngaged();
+    const isChannelEngaged = channelCtx.isBotEngaged();
 
     let shouldProcess = isMentioned || isReply || wasActive || isChannelEngaged || isDm;
     if (!shouldProcess) {

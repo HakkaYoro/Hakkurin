@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { GeminiAdapter, PRIMARY_MODELS } from '../src/ai/infrastructure/adapters/gemini.adapter';
 import { parseAnalysisJson, errorAnalysisResult } from '../src/ai/infrastructure/mappers/gemini.mapper';
+import { buildInteractionPrompt } from '../src/ai/application/ai-prompts';
 import { ConfigService } from '../src/common/config.service';
 import type { InteractionContext } from '../src/ai/domain/ports/ai-brain.port';
 
@@ -319,6 +320,36 @@ describe('GeminiAdapter — web_search two-pass (solo modelos gemini)', () => {
     const parts = third.contents[2].parts;
     expect(parts[0].functionResponse.name).toBe('web_search');
     expect(parts[0].functionResponse.response.result).toContain('https://e.com/1');
+  });
+});
+
+describe('buildInteractionPrompt — imageNote', () => {
+  const base = {
+    systemPrompt: 'sys',
+    developerId: '1',
+    currentTime: 't',
+    botAge: '1 día',
+    profilesText: '',
+    historyText: '',
+    selfMem: '',
+    channelType: 'DM',
+    isSessionActive: false,
+    userName: 'U',
+    userId: '1',
+    userText: 'hola',
+    hasImage: false,
+    urlContext: null,
+  };
+
+  it('con imageNote renderiza [ESTADO DE IMÁGENES] con la instrucción', () => {
+    const p = buildInteractionPrompt({ ...base, imageNote: 'ráfaga de imágenes' });
+    expect(p).toContain('[ESTADO DE IMÁGENES]');
+    expect(p).toContain('ráfaga de imágenes');
+    expect(p).toContain('NO actúes como si hubieras visto la imagen');
+  });
+
+  it('sin imageNote la sección no aparece', () => {
+    expect(buildInteractionPrompt(base)).not.toContain('[ESTADO DE IMÁGENES]');
   });
 });
 

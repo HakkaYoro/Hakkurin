@@ -29,6 +29,7 @@ export interface InteractionPromptParams {
   userId: string;
   userText: string;
   hasImage: boolean;
+  imageNote?: string | null;
   urlContext?: string | null;
 }
 
@@ -60,7 +61,7 @@ ${p.historyText}
 MENSAJE ACTUAL:
 Usuario: ${p.userName} (ID: ${p.userId})
 Contenido: "${p.userText}"
-[IMAGEN ADJUNTA]: ${p.hasImage ? 'SÍ' : 'NO'}
+[IMAGEN ADJUNTA]: ${p.hasImage ? 'SÍ' : 'NO'}${p.imageNote ? `\n[ESTADO DE IMÁGENES]: ${p.imageNote} Reacciona con naturalidad (queja corta o ignora); NO actúes como si hubieras visto la imagen.` : ''}
 [DATOS DEL ENLACE/URL ADJUNTO AL MENSAJE]:
 ${p.urlContext || 'Ninguno'}
 

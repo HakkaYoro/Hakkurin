@@ -299,6 +299,59 @@ describe('DiscordAdapter — pipeline de mensajes', () => {
   });
 });
 
+describe('DiscordAdapter — anti-spam de imágenes', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('misma imagen reenviada: fetch una sola vez, sin visión y con imageNote', async () => {
+    const brain = makeBrain();
+    const { svc } = makeService({}, brain);
+    // LazyTransport.fetchImage delega al adapter real (red) → stub.
+    const fetchImage = vi.spyOn(svc, 'fetchImage').mockResolvedValue(Buffer.from('png'));
+    (svc as any).client = makeClient();
+    const att = { name: 'a.png', url: 'http://x/a.png', contentType: 'image/png' };
+    const mentions = () => ({ has: vi.fn(() => true), users: new Map() });
+    const msg1 = fakeMsg({ id: 'm1', attachments: new Map([['a', att]]), mentions: mentions() });
+    const msg2 = fakeMsg({ id: 'm2', attachments: new Map([['a', att]]), mentions: mentions() });
+
+    void (svc as any).onMessage(msg1);
+    await vi.advanceTimersByTimeAsync(45000); // msg1 sale del debounce y se procesa
+    void (svc as any).onMessage(msg2);
+    await vi.advanceTimersByTimeAsync(45000);
+
+    expect(brain.analyzeInteraction).toHaveBeenCalledTimes(2);
+    expect(fetchImage).toHaveBeenCalledTimes(1); // sólo la primera vez
+    const first = brain.analyzeInteraction.mock.calls[0][0];
+    expect(first.imageData).toEqual(Buffer.from('png'));
+    expect(first.imageMimeType).toBe('image/png');
+    expect(first.imageNote).toBeNull();
+    const second = brain.analyzeInteraction.mock.calls[1][0];
+    expect(second.imageData).toBeNull();
+    expect(second.imageMimeType).toBeNull();
+    expect(second.imageNote).toContain('MISMA imagen');
+  });
+
+  it('gif repetido: sin descarga y con imageNote (los gifs no van a visión)', async () => {
+    const brain = makeBrain();
+    const { svc } = makeService({}, brain);
+    const fetchImage = vi.spyOn(svc, 'fetchImage').mockResolvedValue(Buffer.from('gif'));
+    (svc as any).client = makeClient();
+    const att = { name: 'a.gif', url: 'http://x/a.gif', contentType: 'image/gif' };
+    const mentions = () => ({ has: vi.fn(() => true), users: new Map() });
+    void (svc as any).onMessage(fakeMsg({ id: 'g1', attachments: new Map([['a', att]]), mentions: mentions() }));
+    await vi.advanceTimersByTimeAsync(45000);
+    void (svc as any).onMessage(fakeMsg({ id: 'g2', attachments: new Map([['a', att]]), mentions: mentions() }));
+    await vi.advanceTimersByTimeAsync(45000);
+
+    expect(fetchImage).not.toHaveBeenCalled();
+    const second = brain.analyzeInteraction.mock.calls[1][0];
+    expect(second.imageNote).toContain('MISMA imagen');
+  });
+});
+
 describe('DiscordAdapter — presencia y envío', () => {
   afterEach(() => vi.restoreAllMocks());
 
