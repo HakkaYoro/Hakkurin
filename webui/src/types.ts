@@ -16,6 +16,7 @@ export interface StatusInfo {
   provider: 'gemini' | 'openrouter';
   chatModel: string;
   memoryModel: string;
+  reasoningEffort: string;
   geminiKeysCount: number;
   openrouterConfigured: boolean;
 }
@@ -29,6 +30,7 @@ export interface AppConfig {
   ai_provider: 'gemini' | 'openrouter';
   openrouter_chat_model: string;
   openrouter_memory_model: string;
+  openrouter_reasoning_effort: string;
   max_history_messages: number;
   deafen_move_enabled: boolean;
   deafen_move_channel_id: string;
@@ -73,10 +75,19 @@ export interface Totals {
 }
 
 export interface StatsData {
-  windowDays: number;
+  windowHours: number;
   totals: Totals;
   prev: Totals;
-  days: DayStat[];
+  series: Array<{ key: string; messages: number; aiCalls: number; tokens: number; cost: number }>;
+  daily: Array<{
+    day: string;
+    messages: number;
+    aiCalls: Record<string, number>;
+    tokensIn: number;
+    tokensOut: number;
+    tokensCached: number;
+    cost: number;
+  }>;
   heatmap: Array<{ day: string; messages: number }>;
   models: Array<{ model: string; calls: number }>;
   users: Array<MemberInfo & { messages: number }>;

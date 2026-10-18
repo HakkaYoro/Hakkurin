@@ -36,12 +36,13 @@ el original queda en la rama `legacy-python`.
   auto-actualización horaria de yt-dlp sin re-buildear imagen.
 - **WebUI (React + Vite)** — SPA oscura servida por el bot (API JSON + bundle en
   `dist/webui`): config en vivo con subtabs (el bloque de IA cambia según el proveedor,
-  secretos write-only), status card refrescada cada 30s, dashboard de **estadísticas**
-  (KPIs con delta vs período anterior, gráfica de actividad, donut de caché, heatmap
-  diario, leaderboard con avatar/nickname/ID, modelos usados y comandos con su top
-  usuario), browse y borrado de memorias con nombre visible y **Exportar Logs** (ring
-  buffer en memoria, descarga `hakkurin.log` protegida por el mismo AuthGuard HTTP
-  Basic opt-in).
+  nivel de **reasoning effort** de OpenRouter, secretos write-only), status card
+  refrescada cada 30s, dashboard de **estadísticas** con periodos 1h / 1d / 1 semana /
+  1 mes (KPIs con delta vs período anterior, gráfica de actividad, donut de caché,
+  heatmap diario, leaderboard con avatar/nickname/ID, modelos usados, comandos con su
+  top usuario y botón de reinicio de datos), browse y borrado de memorias con nombre
+  visible y **Exportar Logs** (ring buffer en memoria, descarga `hakkurin.log`
+  protegida por el mismo AuthGuard HTTP Basic opt-in).
 - **Reconexión automática** — login con reintento indefinido, watchdog que recrea el
   cliente si el gateway queda zombie ~3 min, handlers de shard con logs y
   `unhandledRejection`/`uncaughtException` capturados: un corte de red ya no mata al bot.
@@ -127,9 +128,9 @@ eventos y **puertos** como abstract classes), `application/` (use-cases) e
 ```
 src/
   common/        ConfigService @Global (data/config.json atómico, sidecarUrl())
-  stats/         StatsService @Global: mensajes/usuarios, comandos, modelos y
-                 tokens/coste por día (flush atómico a data/stats.json; rankings
-                 agregados para la WebUI)
+  stats/         StatsService @Global: buckets por hora (mensajes/usuarios, comandos,
+                 modelos, tokens/coste) con flush atómico a data/stats.json y
+                 rankings(hours) agregados para la WebUI (1h/24h/1sem/1mes + reset)
   ai/            puerto AiBrain; RoutingBrain delega a GeminiAdapter u
                  OpenRouterAdapter según ai_provider (hot-swap); mapper zod de la
                  salida del LLM

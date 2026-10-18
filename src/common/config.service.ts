@@ -43,6 +43,7 @@ const DEFAULTS: HakkurinConfig = {
   deafen_move_minutes: 3,
   ai_provider: 'gemini',
   max_history_messages: 20,
+  openrouter_reasoning_effort: 'default',
 };
 
 @Injectable()

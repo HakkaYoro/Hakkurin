@@ -45,15 +45,17 @@ function makeController() {
   const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarAdapter] falló') } as any;
   const stats = {
     rankings: vi.fn(() => ({
-      windowDays: 7,
+      windowHours: 24,
       totals: { messages: 7, aiCalls: 3, tokensIn: 80, tokensOut: 8, tokensCached: 30, cost: 0.7 },
       prev: { messages: 1, aiCalls: 0, tokensIn: 10, tokensOut: 1, tokensCached: 0, cost: 0 },
-      days: [],
+      series: [],
+      daily: [],
       heatmap: [],
       models: [{ model: 'deepseek/v3', calls: 3 }],
       users: [{ id: '100', messages: 5 }],
       commands: [{ command: 'play', count: 2, topUserId: '100', topUserCount: 2 }],
     })),
+    reset: vi.fn(async () => {}),
   } as any;
   const ctl = new WebController(config, memory, discord, brain, logTee, stats);
   return { ctl, config, memory, discord, brain, logTee, stats };
@@ -144,16 +146,24 @@ describe('WebController — api/stats', () => {
   it('miembro irrecuperable (salió del server) → nombre = ID crudo', async () => {
     const { ctl, discord } = makeController();
     discord.getMemberInfo.mockResolvedValue(null);
-    const r = await ctl.statsData('30');
+    const r = await ctl.statsData('168');
     expect(r.users[0].name).toBe('100');
   });
 
-  it('days=30 → rankings de 30 días; otro valor → 7', async () => {
+  it('hours whitelisted (1/24/168/720); valor basura → 24', async () => {
     const { ctl, stats } = makeController();
-    await ctl.statsData('30');
-    expect(stats.rankings).toHaveBeenCalledWith(30);
+    await ctl.statsData('1');
+    expect(stats.rankings).toHaveBeenLastCalledWith(1);
+    await ctl.statsData('720');
+    expect(stats.rankings).toHaveBeenLastCalledWith(720);
     await ctl.statsData('basura');
-    expect(stats.rankings).toHaveBeenLastCalledWith(7);
+    expect(stats.rankings).toHaveBeenLastCalledWith(24);
+  });
+
+  it('resetStats delega en StatsService y responde ok', async () => {
+    const { ctl, stats } = makeController();
+    await expect(ctl.resetStats()).resolves.toEqual({ ok: true });
+    expect(stats.reset).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -225,6 +235,16 @@ describe('WebController — api/update_config', () => {
     expect(config.store.ai_provider).toBe('gemini');
     await ctl.updateConfig({ ai_provider: 'gemini' } as any);
     expect(config.store.ai_provider).toBe('gemini');
+  });
+
+  it('reasoning effort: whitelist de 5 valores; basura se ignora', async () => {
+    const { ctl, config } = makeController();
+    await ctl.updateConfig({ openrouter_reasoning_effort: 'high' } as any);
+    expect(config.store.openrouter_reasoning_effort).toBe('high');
+    await ctl.updateConfig({ openrouter_reasoning_effort: 'ultra' } as any);
+    expect(config.store.openrouter_reasoning_effort).toBe('high');
+    await ctl.updateConfig({ openrouter_reasoning_effort: 'none' } as any);
+    expect(config.store.openrouter_reasoning_effort).toBe('none');
   });
 });
 

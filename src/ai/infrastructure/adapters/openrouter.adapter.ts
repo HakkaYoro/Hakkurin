@@ -108,6 +108,12 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
       maxTokens: opts.maxTokens,
       sessionId: opts.sessionId,
     };
+    // El SDK serializa reasoning → "reasoning" en el body; el valor lo lee el
+    // proveedor en caliente, así que cambiarlo en la WebUI no requiere reload.
+    const effort = this.config.get<string>('openrouter_reasoning_effort', 'default');
+    if (effort === 'none' || effort === 'low' || effort === 'medium' || effort === 'high') {
+      chatRequest.reasoning = { effort };
+    }
     // Caching explícito según proveedor: Anthropic acepta la directiva a nivel
     // raíz; Qwen (Alibaba) la exige por bloque (OpenAI/DeepSeek/Z.AI/Gemini son
     // automáticos y no necesitan nada).

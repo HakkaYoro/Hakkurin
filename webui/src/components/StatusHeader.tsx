@@ -10,10 +10,21 @@ export default function StatusHeader({ status }: { status: StatusInfo | null }) 
     );
   }
   const { bot, provider } = status;
-  const models =
-    provider === 'openrouter'
-      ? [status.chatModel, status.memoryModel].filter(Boolean).join(' · ') || 'sin configurar'
-      : `${status.geminiKeysCount} key(s) Gemini`;
+  const EFFORT_LABEL: Record<string, string> = {
+    default: '',
+    none: 'apagado',
+    low: 'bajo',
+    medium: 'medio',
+    high: 'alto',
+  };
+  let models: string;
+  if (provider === 'openrouter') {
+    const base = [status.chatModel, status.memoryModel].filter(Boolean).join(' · ') || 'sin configurar';
+    const effort = EFFORT_LABEL[status.reasoningEffort] ?? '';
+    models = effort ? `${base} · pensamiento ${effort}` : base;
+  } else {
+    models = `${status.geminiKeysCount} key(s) Gemini`;
+  }
   return (
     <header className="card status-card">
       <div className="status-line">

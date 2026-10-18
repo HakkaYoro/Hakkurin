@@ -49,6 +49,7 @@ export class WebController {
       ai_provider: c.ai_provider ?? 'gemini',
       openrouter_chat_model: c.openrouter_chat_model ?? '',
       openrouter_memory_model: c.openrouter_memory_model ?? '',
+      openrouter_reasoning_effort: c.openrouter_reasoning_effort ?? 'default',
       max_history_messages: c.max_history_messages ?? 20,
       deafen_move_enabled: !!c.deafen_move_enabled,
       deafen_move_channel_id: c.deafen_move_channel_id ?? '',
@@ -75,14 +76,17 @@ export class WebController {
       provider: c.ai_provider ?? 'gemini',
       chatModel: c.openrouter_chat_model || '',
       memoryModel: c.openrouter_memory_model || '',
+      reasoningEffort: c.openrouter_reasoning_effort ?? 'default',
       geminiKeysCount: (c.gemini_keys ?? []).length,
       openrouterConfigured: !!(c.openrouter_api_key && c.openrouter_chat_model),
     };
   }
 
   @Get('api/stats')
-  async statsData(@Query('days') daysParam?: string) {
-    const r = this.stats.rankings(daysParam === '30' ? 30 : 7);
+  async statsData(@Query('hours') hoursParam?: string) {
+    const allowed = [1, 24, 168, 720];
+    const hours = allowed.includes(Number(hoursParam)) ? Number(hoursParam) : 24;
+    const r = this.stats.rankings(hours);
     const cache = new Map<string, MemberInfo>();
     // Resolución en secuencia: mismo userId en varios rankings → una sola llamada.
     const ids = new Set<string>(r.users.map((u) => u.id));
@@ -95,6 +99,13 @@ export class WebController {
       topUser: c.topUserId ? { ...cache.get(c.topUserId)!, count: c.topUserCount } : null,
     }));
     return { ...r, users, commands };
+  }
+
+  @Post('api/stats/reset')
+  @HttpCode(200)
+  async resetStats(): Promise<{ ok: true }> {
+    await this.stats.reset();
+    return { ok: true };
   }
 
   private async resolveMember(userId: string, cache: Map<string, MemberInfo>): Promise<MemberInfo> {
@@ -121,6 +132,9 @@ export class WebController {
     await this.config.set('deafen_move_enabled', Boolean(body.deafen_move_enabled));
     if (body.ai_provider === 'gemini' || body.ai_provider === 'openrouter') {
       await this.config.set('ai_provider', body.ai_provider);
+    }
+    if (['default', 'none', 'low', 'medium', 'high'].includes(body.openrouter_reasoning_effort)) {
+      await this.config.set('openrouter_reasoning_effort', body.openrouter_reasoning_effort);
     }
     for (const key of [
       'navidrome_base_url', 'navidrome_external_url', 'navidrome_username', 'ytdl_sidecar_url',

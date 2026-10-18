@@ -138,6 +138,24 @@ describe('OpenRouterAdapter (contrato AiBrain)', () => {
     ]);
   });
 
+  it('reasoning effort: low → chatRequest.reasoning={effort}; none → none; default/ausente → sin campo', async () => {
+    const low = makeAdapter(vi.fn().mockResolvedValue(completion('ok')), { openrouter_reasoning_effort: 'low' });
+    await low.adapter.generateResponse('x');
+    expect(low.chatSend.mock.calls[0][0].chatRequest.reasoning).toEqual({ effort: 'low' });
+
+    const off = makeAdapter(vi.fn().mockResolvedValue(completion('ok')), { openrouter_reasoning_effort: 'none' });
+    await off.adapter.generateResponse('x');
+    expect(off.chatSend.mock.calls[0][0].chatRequest.reasoning).toEqual({ effort: 'none' });
+
+    const def = makeAdapter(vi.fn().mockResolvedValue(completion('ok')), { openrouter_reasoning_effort: 'default' });
+    await def.adapter.generateResponse('x');
+    expect(def.chatSend.mock.calls[0][0].chatRequest.reasoning).toBeUndefined();
+
+    const absent = makeAdapter(vi.fn().mockResolvedValue(completion('ok')));
+    await absent.adapter.generateResponse('x');
+    expect(absent.chatSend.mock.calls[0][0].chatRequest.reasoning).toBeUndefined();
+  });
+
   it('qwen: content ya en parts → cacheControl sobre el primer bloque texto', async () => {
     const chatSend = vi.fn().mockResolvedValue(completion('{"intent":"ignore","response_content":[],"is_talking_to_me":false,"ping_users":[]}'));
     const { adapter, chatSend: send } = makeAdapter(chatSend, { openrouter_chat_model: 'qwen/qwen4-72b' });

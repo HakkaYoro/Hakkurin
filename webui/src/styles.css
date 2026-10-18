@@ -323,6 +323,13 @@ textarea {
   flex-wrap: wrap;
 }
 
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .seg {
   display: inline-flex;
   background: var(--panel-2);

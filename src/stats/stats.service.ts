@@ -6,6 +6,9 @@ import { atomicWrite, gmt4Date } from '../common/util';
 const STATS_FILE = 'data/stats.json';
 const KEEP_DAYS = 30;
 
+// Buckets por HORA (clave 'YYYY-MM-DDTHH', GMT-4): permiten ventanas de 1h/24h;
+// los rangos de 1 sem / 1 mes agrupan por día. Los stats.json antiguos (claves
+// 'YYYY-MM-DD') se conservan como buckets legacy y cuentan en ventanas largas.
 export interface DayStat {
   messages: number;
   aiCalls: Record<string, number>;
@@ -40,11 +43,20 @@ export interface RankingCommand {
   topUserCount: number;
 }
 
+export interface SeriesPoint {
+  key: string;
+  messages: number;
+  aiCalls: number;
+  tokens: number;
+  cost: number;
+}
+
 export interface Rankings {
-  windowDays: number;
+  windowHours: number;
   totals: Totals;
   prev: Totals;
-  days: Array<DayStat & { day: string }>;
+  series: SeriesPoint[];
+  daily: Array<{ day: string; messages: number; aiCalls: Record<string, number>; tokensIn: number; tokensOut: number; tokensCached: number; cost: number }>;
   heatmap: Array<{ day: string; messages: number }>;
   models: Array<{ model: string; calls: number }>;
   users: RankingUser[];
@@ -73,7 +85,11 @@ const emptyTotals = (): Totals => ({
   cost: 0,
 });
 
-function dayKey(d = new Date()): string {
+function hourKey(d = new Date()): string {
+  return gmt4Date(d).toISOString().slice(0, 13);
+}
+
+function dayKeyOf(d = new Date()): string {
   return gmt4Date(d).toISOString().slice(0, 10);
 }
 
@@ -84,7 +100,7 @@ function bump(map: Record<string, number>, key: string): void {
 @Injectable()
 export class StatsService implements OnModuleDestroy {
   private readonly logger = new Logger(StatsService.name);
-  private days = new Map<string, DayStat>();
+  private buckets = new Map<string, DayStat>();
   private loadPromise: Promise<void> | null = null;
 
   constructor() {
@@ -94,74 +110,154 @@ export class StatsService implements OnModuleDestroy {
   private async load(): Promise<void> {
     try {
       const raw = JSON.parse(await fs.promises.readFile(STATS_FILE, 'utf-8'));
-      // Días guardados antes de users/commands/models quedan completos.
-      this.days = new Map(Object.entries(raw).map(([k, d]) => [k, { ...emptyDay(), ...(d as DayStat) }]));
+      // Buckets guardados con un esquema anterior quedan completos.
+      this.buckets = new Map(Object.entries(raw).map(([k, d]) => [k, { ...emptyDay(), ...(d as DayStat) }]));
     } catch {
       // sin stats aún: empezar de cero
     }
   }
 
-  private day(): DayStat {
-    const key = dayKey();
-    let d = this.days.get(key);
-    if (!d) {
-      d = emptyDay();
-      this.days.set(key, d);
+  private bucket(): DayStat {
+    const key = hourKey();
+    let b = this.buckets.get(key);
+    if (!b) {
+      b = emptyDay();
+      this.buckets.set(key, b);
     }
-    return d;
+    return b;
   }
 
   bumpMessage(userId: string): void {
-    const d = this.day();
-    d.messages++;
-    bump(d.users, userId);
+    const b = this.bucket();
+    b.messages++;
+    bump(b.users, userId);
   }
 
   bumpAiCall(kind: string): void {
-    bump(this.day().aiCalls, kind);
+    bump(this.bucket().aiCalls, kind);
   }
 
   bumpCommand(command: string, userId: string): void {
-    const d = this.day();
-    bump(d.commands, command);
-    const perUser = d.commandUsers[command] ?? (d.commandUsers[command] = {});
+    const b = this.bucket();
+    bump(b.commands, command);
+    const perUser = b.commandUsers[command] ?? (b.commandUsers[command] = {});
     bump(perUser, userId);
   }
 
   addTokens(inTok: number, outTok: number, cached = 0, cost = 0, model = ''): void {
-    const d = this.day();
-    d.tokensIn += inTok;
-    d.tokensOut += outTok;
-    d.tokensCached += cached;
-    d.cost = (d.cost ?? 0) + cost; // días viejos en stats.json no tienen cost
-    if (model) bump(d.models, model);
+    const b = this.bucket();
+    b.tokensIn += inTok;
+    b.tokensOut += outTok;
+    b.tokensCached += cached;
+    b.cost = (b.cost ?? 0) + cost;
+    if (model) bump(b.models, model);
   }
 
-  rankings(days = 7): Rankings {
-    const all = [...this.days.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-    const window = all.slice(0, days);
-    const prevWindow = all.slice(days, days * 2);
+  /** Borra todo el historial y lo persiste de inmediato. */
+  async reset(): Promise<void> {
+    await this.loadPromise;
+    this.buckets.clear();
+    try {
+      await atomicWrite(STATS_FILE, '{}');
+    } catch (e) {
+      this.logger.warn(`No pude resetear stats: ${(e as Error).message}`);
+    }
+  }
 
+  rankings(hours = 24): Rankings {
+    const now = new Date();
+    const curCutoff = hourKey(new Date(now.getTime() - hours * 3_600_000));
+    const prevCutoff = hourKey(new Date(now.getTime() - 2 * hours * 3_600_000));
+
+    let totals = emptyTotals();
+    let prev = emptyTotals();
     const models: Record<string, number> = {};
     const users: Record<string, number> = {};
     const cmdCount: Record<string, number> = {};
     const cmdUsers: Record<string, Record<string, number>> = {};
-    for (const [, d] of window) {
-      for (const [m, n] of Object.entries(d.models)) models[m] = (models[m] ?? 0) + n;
-      for (const [u, n] of Object.entries(d.users)) users[u] = (users[u] ?? 0) + n;
-      for (const [c, n] of Object.entries(d.commands)) cmdCount[c] = (cmdCount[c] ?? 0) + n;
-      for (const [c, perUser] of Object.entries(d.commandUsers)) {
-        const acc = cmdUsers[c] ?? (cmdUsers[c] = {});
-        for (const [u, n] of Object.entries(perUser)) acc[u] = (acc[u] ?? 0) + n;
+    const byDay = new Map<string, number>();
+    const dailyAgg = new Map<string, { day: string; messages: number; aiCalls: Record<string, number>; tokensIn: number; tokensOut: number; tokensCached: number; cost: number }>();
+    const byHourFull = new Map<string, { messages: number; aiCalls: number; tokens: number; cost: number }>();
+
+    for (const [key, b] of this.buckets) {
+      if (key >= curCutoff) {
+        totals.messages += b.messages;
+        totals.tokensIn += b.tokensIn;
+        totals.tokensOut += b.tokensOut;
+        totals.tokensCached += b.tokensCached;
+        totals.cost += b.cost ?? 0;
+        totals.aiCalls += Object.values(b.aiCalls).reduce((a, c) => a + c, 0);
+        for (const [m, n] of Object.entries(b.models)) models[m] = (models[m] ?? 0) + n;
+        for (const [u, n] of Object.entries(b.users)) users[u] = (users[u] ?? 0) + n;
+        for (const [c, n] of Object.entries(b.commands)) cmdCount[c] = (cmdCount[c] ?? 0) + n;
+        for (const [c, perUser] of Object.entries(b.commandUsers)) {
+          const acc = cmdUsers[c] ?? (cmdUsers[c] = {});
+          for (const [u, n] of Object.entries(perUser)) acc[u] = (acc[u] ?? 0) + n;
+        }
+        const day = key.slice(0, 10);
+        const d = dailyAgg.get(day) ?? { day, messages: 0, aiCalls: {}, tokensIn: 0, tokensOut: 0, tokensCached: 0, cost: 0 };
+        d.messages += b.messages;
+        d.tokensIn += b.tokensIn;
+        d.tokensOut += b.tokensOut;
+        d.tokensCached += b.tokensCached;
+        d.cost += b.cost ?? 0;
+        for (const [k, n] of Object.entries(b.aiCalls)) d.aiCalls[k] = (d.aiCalls[k] ?? 0) + n;
+        dailyAgg.set(day, d);
+        const h = byHourFull.get(key) ?? { messages: 0, aiCalls: 0, tokens: 0, cost: 0 };
+        h.messages += b.messages;
+        h.aiCalls += Object.values(b.aiCalls).reduce((a, c) => a + c, 0);
+        h.tokens += b.tokensIn + b.tokensOut;
+        h.cost += b.cost ?? 0;
+        byHourFull.set(key, h);
+      } else if (key >= prevCutoff) {
+        prev.messages += b.messages;
+        prev.tokensIn += b.tokensIn;
+        prev.tokensOut += b.tokensOut;
+        prev.tokensCached += b.tokensCached;
+        prev.cost += b.cost ?? 0;
+        prev.aiCalls += Object.values(b.aiCalls).reduce((a, c) => a + c, 0);
+      }
+      const day = key.slice(0, 10);
+      byDay.set(day, (byDay.get(day) ?? 0) + b.messages);
+    }
+
+    // Serie del gráfico: por hora (1h/24h, inclusive la hora de corte) o por día
+    // (1 sem / 1 mes).
+    const series: SeriesPoint[] = [];
+    if (hours <= 24) {
+      for (let i = hours; i >= 0; i--) {
+        const key = hourKey(new Date(now.getTime() - i * 3_600_000));
+        const h = byHourFull.get(key);
+        series.push({ key, messages: h?.messages ?? 0, aiCalls: h?.aiCalls ?? 0, tokens: h?.tokens ?? 0, cost: h?.cost ?? 0 });
+      }
+    } else {
+      const days = Math.ceil(hours / 24);
+      for (let i = days - 1; i >= 0; i--) {
+        const key = dayKeyOf(new Date(now.getTime() - i * 86_400_000));
+        const d = dailyAgg.get(key);
+        series.push({
+          key,
+          messages: d?.messages ?? 0,
+          aiCalls: d ? Object.values(d.aiCalls).reduce((a, c) => a + c, 0) : 0,
+          tokens: (d?.tokensIn ?? 0) + (d?.tokensOut ?? 0),
+          cost: d?.cost ?? 0,
+        });
       }
     }
 
+    const heatmap: Array<{ day: string; messages: number }> = [];
+    for (let i = KEEP_DAYS - 1; i >= 0; i--) {
+      const day = dayKeyOf(new Date(now.getTime() - i * 86_400_000));
+      heatmap.push({ day, messages: byDay.get(day) ?? 0 });
+    }
+
     return {
-      windowDays: days,
-      totals: this.sumDays(window),
-      prev: this.sumDays(prevWindow),
-      days: window.map(([day, d]) => ({ day, ...d })).reverse(),
-      heatmap: all.slice(0, 30).map(([day, d]) => ({ day, messages: d.messages })).reverse(),
+      windowHours: hours,
+      totals,
+      prev,
+      series,
+      daily: [...dailyAgg.values()].sort((a, b) => (a.day > b.day ? 1 : -1)),
+      heatmap,
       models: Object.entries(models)
         .map(([model, calls]) => ({ model, calls }))
         .sort((a, b) => b.calls - a.calls),
@@ -184,28 +280,15 @@ export class StatsService implements OnModuleDestroy {
     };
   }
 
-  private sumDays(entries: Array<[string, DayStat]>): Totals {
-    const t = emptyTotals();
-    for (const [, d] of entries) {
-      t.messages += d.messages;
-      t.tokensIn += d.tokensIn;
-      t.tokensOut += d.tokensOut;
-      t.tokensCached += d.tokensCached;
-      t.cost += d.cost ?? 0;
-      t.aiCalls += Object.values(d.aiCalls).reduce((a, b) => a + b, 0);
-    }
-    return t;
-  }
-
   @Interval(60000)
   private async flush(): Promise<void> {
     await this.loadPromise;
-    const cutoff = dayKey(new Date(Date.now() - KEEP_DAYS * 86_400_000));
-    for (const key of this.days.keys()) {
-      if (key < cutoff) this.days.delete(key);
+    const cutoff = dayKeyOf(new Date(Date.now() - KEEP_DAYS * 86_400_000));
+    for (const key of this.buckets.keys()) {
+      if (key.slice(0, 10) < cutoff) this.buckets.delete(key);
     }
     try {
-      await atomicWrite(STATS_FILE, JSON.stringify(Object.fromEntries(this.days)));
+      await atomicWrite(STATS_FILE, JSON.stringify(Object.fromEntries(this.buckets)));
     } catch (e) {
       this.logger.warn(`No pude guardar stats: ${(e as Error).message}`);
     }

@@ -211,6 +211,21 @@ function IaSection({ form, set, setSecret }: SectionProps) {
               />
             </div>
           </div>
+          <div className="form-group">
+            <label htmlFor="f-or-reasoning">Nivel de pensamiento (reasoning)</label>
+            <select
+              id="f-or-reasoning"
+              value={form.openrouter_reasoning_effort}
+              onChange={(e) => set('openrouter_reasoning_effort', e.target.value)}
+            >
+              <option value="default">Por defecto del modelo</option>
+              <option value="none">Apagado</option>
+              <option value="low">Bajo</option>
+              <option value="medium">Medio</option>
+              <option value="high">Alto</option>
+            </select>
+            <p className="hint">Aplica al chat y a la memoria; los modelos sin razonamiento lo ignoran.</p>
+          </div>
         </>
       )}
 

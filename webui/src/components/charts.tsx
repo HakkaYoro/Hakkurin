@@ -18,17 +18,24 @@ const W = 640;
 const H = 190;
 const PAD = { t: 14, r: 10, b: 24, l: 10 };
 
-export function AreaChart({ days }: { days: Array<{ day: string; messages: number }> }) {
+// Claves de serie: 'YYYY-MM-DDTHH' (horaria) o 'YYYY-MM-DD' (diaria).
+function seriesLabel(key: string, long = false): string {
+  if (key.includes('T')) {
+    const day = new Date(`${key.slice(0, 10)}T00:00:00`).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+    return long ? `${day} ${key.slice(11, 13)}:00` : `${key.slice(11, 13)}h`;
+  }
+  return new Date(`${key}T00:00:00`).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+}
+
+export function AreaChart({ series }: { series: Array<{ key: string; messages: number }> }) {
   const [hover, setHover] = useState<number | null>(null);
-  if (days.length < 2) return <p className="empty">Sin datos suficientes.</p>;
-  const max = Math.max(...days.map((d) => d.messages), 1);
-  const n = days.length;
+  if (series.length < 2) return <p className="empty">Sin datos suficientes para la serie.</p>;
+  const max = Math.max(...series.map((d) => d.messages), 1);
+  const n = series.length;
   const x = (i: number) => PAD.l + (i * (W - PAD.l - PAD.r)) / (n - 1);
   const y = (v: number) => H - PAD.b - (v / max) * (H - PAD.t - PAD.b);
-  const line = days.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.messages).toFixed(1)}`).join(' ');
+  const line = series.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.messages).toFixed(1)}`).join(' ');
   const area = `${line} L${x(n - 1).toFixed(1)},${H - PAD.b} L${x(0).toFixed(1)},${H - PAD.b} Z`;
-  const fmtDay = (day: string) =>
-    new Date(`${day}T00:00:00`).toLocaleDateString('es', { day: 'numeric', month: 'short' });
 
   return (
     <div className="chart-wrap">
@@ -36,7 +43,7 @@ export function AreaChart({ days }: { days: Array<{ day: string; messages: numbe
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Mensajes por día, máximo ${fmtInt(max)}`}
+        aria-label={`Mensajes en el periodo, máximo ${fmtInt(max)}`}
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const vx = ((e.clientX - rect.left) / rect.width) * W;
@@ -54,18 +61,18 @@ export function AreaChart({ days }: { days: Array<{ day: string; messages: numbe
         {hover != null && (
           <g>
             <line x1={x(hover)} x2={x(hover)} y1={PAD.t} y2={H - PAD.b} className="cursor" />
-            <circle cx={x(hover)} cy={y(days[hover].messages)} r="4" className="point" />
+            <circle cx={x(hover)} cy={y(series[hover].messages)} r="4" className="point" />
           </g>
         )}
-        <text x={PAD.l} y={H - 6} className="tick">{fmtDay(days[0].day)}</text>
-        <text x={W - PAD.r} y={H - 6} textAnchor="end" className="tick">{fmtDay(days[n - 1].day)}</text>
+        <text x={PAD.l} y={H - 6} className="tick">{seriesLabel(series[0].key)}</text>
+        <text x={W - PAD.r} y={H - 6} textAnchor="end" className="tick">{seriesLabel(series[n - 1].key)}</text>
       </svg>
       {hover != null && (
         <div
           className="chart-tip"
-          style={{ left: `${(x(hover) / W) * 100}%`, top: `${(y(days[hover].messages) / H) * 100}%` }}
+          style={{ left: `${(x(hover) / W) * 100}%`, top: `${(y(series[hover].messages) / H) * 100}%` }}
         >
-          <strong className="num">{fmtInt(days[hover].messages)}</strong> · {days[hover].day}
+          <strong className="num">{fmtInt(series[hover].messages)}</strong> · {seriesLabel(series[hover].key, true)}
         </div>
       )}
     </div>

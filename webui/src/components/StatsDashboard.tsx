@@ -1,8 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 import { api } from '../api';
-import { fmtCompact, fmtInt, pct as pctDelta } from '../format';
-import type { DayStat, StatsData } from '../types';
+import { fmtCompact, fmtInt, pct as pctDelta, ToastContext } from '../format';
+import type { StatsData } from '../types';
 import { AreaChart, Avatar, Donut, HBars, Heatmap, Spark } from './charts';
+
+const PERIODS: Array<[number, string]> = [
+  [1, '1 h'],
+  [24, '1 d'],
+  [168, '1 sem'],
+  [720, '1 mes'],
+];
 
 function Kpi({
   label,
@@ -39,89 +46,103 @@ function Kpi({
   );
 }
 
-const sumCalls = (d: DayStat) => Object.values(d.aiCalls).reduce((a, b) => a + b, 0);
+const sumCalls = (d: { aiCalls: Record<string, number> }) => Object.values(d.aiCalls).reduce((a, b) => a + b, 0);
 
 export default function StatsDashboard() {
-  const [days, setDays] = useState(7);
+  const notify = useContext(ToastContext);
+  const [hours, setHours] = useState(168);
   const [data, setData] = useState<StatsData | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
+  const load = useCallback(
+    () =>
       api
-        .stats(days)
+        .stats(hours)
         .then((d) => {
-          if (alive) {
-            setData(d);
-            setUpdatedAt(new Date());
-          }
+          setData(d);
+          setUpdatedAt(new Date());
         })
-        .catch(() => {});
+        .catch(() => {}),
+    [hours],
+  );
+
+  useEffect(() => {
     load();
     const t = window.setInterval(load, 30_000);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-    };
-  }, [days]);
+    return () => window.clearInterval(t);
+  }, [load]);
 
   if (!data) return <p className="muted">Cargando stats…</p>;
+
+  const reset = async () => {
+    if (!window.confirm('¿Borrar TODAS las estadísticas? Esta acción no se puede deshacer.')) return;
+    try {
+      await api.resetStats();
+      notify('Estadísticas reiniciadas');
+      await load();
+    } catch {
+      notify('Error al reiniciar las estadísticas', false);
+    }
+  };
 
   const t = data.totals;
   const cachePct = t.tokensIn > 0 ? (t.tokensCached * 100) / t.tokensIn : 0;
   const tokensTotal = t.tokensIn + t.tokensOut;
   const maxUser = data.users[0]?.messages ?? 1;
   const maxCmd = data.commands[0]?.count ?? 1;
+  const periodLabel = PERIODS.find(([h]) => h === hours)?.[1] ?? '';
 
   return (
     <div className="stats">
       <div className="toolbar">
-        <div className="seg" role="group" aria-label="Rango de tiempo">
-          {[7, 30].map((d) => (
+        <div className="seg" role="group" aria-label="Periodo">
+          {PERIODS.map(([h, label]) => (
             <button
-              key={d}
+              key={h}
               type="button"
-              className={days === d ? 'seg-btn active' : 'seg-btn'}
-              aria-pressed={days === d}
-              onClick={() => setDays(d)}
+              className={hours === h ? 'seg-btn active' : 'seg-btn'}
+              aria-pressed={hours === h}
+              onClick={() => setHours(h)}
             >
-              Últimos {d} días
+              {label}
             </button>
           ))}
         </div>
-        {updatedAt && (
-          <span className="muted">
-            Actualizado {updatedAt.toLocaleTimeString('es')} · auto cada 30 s
-          </span>
-        )}
+        <div className="toolbar-right">
+          {updatedAt && (
+            <span className="muted">Actualizado {updatedAt.toLocaleTimeString('es')} · auto cada 30 s</span>
+          )}
+          <button type="button" className="btn danger" onClick={reset}>
+            Reiniciar datos
+          </button>
+        </div>
       </div>
 
       <div className="kpi-grid">
         <Kpi
-          label="Mensajes"
+          label={`Mensajes · ${periodLabel}`}
           value={fmtInt(t.messages)}
           delta={pctDelta(t.messages, data.prev.messages)}
-          spark={data.days.map((d) => d.messages)}
+          spark={data.series.map((s) => s.messages)}
         />
         <Kpi
           label="Llamadas IA"
           value={fmtInt(t.aiCalls)}
           delta={pctDelta(t.aiCalls, data.prev.aiCalls)}
-          spark={data.days.map(sumCalls)}
+          spark={data.series.map((s) => s.aiCalls)}
         />
         <Kpi
           label="Tokens"
           value={fmtCompact(tokensTotal)}
           delta={pctDelta(tokensTotal, data.prev.tokensIn + data.prev.tokensOut)}
-          spark={data.days.map((d) => d.tokensIn + d.tokensOut)}
+          spark={data.series.map((s) => s.tokens)}
           sub={`${Math.round(cachePct)}% del prompt cacheado`}
         />
         <Kpi
           label="Coste"
           value={t.cost > 0 ? `$${t.cost.toFixed(4)}` : '—'}
           delta={pctDelta(t.cost, data.prev.cost)}
-          spark={data.days.map((d) => d.cost)}
+          spark={data.series.map((s) => s.cost)}
           sub="créditos OpenRouter"
         />
       </div>
@@ -129,7 +150,7 @@ export default function StatsDashboard() {
       <div className="grid-2">
         <section className="card">
           <h2>Actividad</h2>
-          <AreaChart days={data.days} />
+          <AreaChart series={data.series} />
         </section>
         <section className="card">
           <h2>Eficiencia de caché</h2>
@@ -154,7 +175,7 @@ export default function StatsDashboard() {
       </div>
 
       <section className="card">
-        <h2>Actividad diaria</h2>
+        <h2>Actividad diaria (últimos 30 días)</h2>
         <Heatmap data={data.heatmap} />
       </section>
 
@@ -187,7 +208,7 @@ export default function StatsDashboard() {
           {data.models.length ? (
             <HBars rows={data.models.slice(0, 8).map((m) => ({ label: m.model, value: m.calls }))} />
           ) : (
-            <p className="empty">Sin llamadas IA en este rango.</p>
+            <p className="empty">Sin llamadas IA en este periodo.</p>
           )}
         </section>
       </div>
@@ -216,41 +237,46 @@ export default function StatsDashboard() {
             ))}
           </div>
         ) : (
-          <p className="empty">Nadie ha usado comandos en este rango.</p>
+          <p className="empty">Nadie ha usado comandos en este periodo.</p>
         )}
       </section>
 
-      <details className="card raw">
-        <summary>Tabla diaria detallada</summary>
-        <table className="stats-table">
-          <thead>
-            <tr>
-              <th>Día</th>
-              <th className="r">Mensajes</th>
-              <th className="r">Llamadas IA</th>
-              <th className="r">Tokens in</th>
-              <th className="r">Tokens out</th>
-              <th className="r">Cache</th>
-              <th className="r">Coste</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...data.days].reverse().map((d) => (
-              <tr key={d.day}>
-                <td>{d.day}</td>
-                <td className="r num">{fmtInt(d.messages)}</td>
-                <td className="r num" title={Object.entries(d.aiCalls).map(([k, v]) => `${k}: ${v}`).join(' · ')}>
-                  {fmtInt(sumCalls(d))}
-                </td>
-                <td className="r num">{fmtInt(d.tokensIn)}</td>
-                <td className="r num">{fmtInt(d.tokensOut)}</td>
-                <td className="r num">{d.tokensIn > 0 ? `${Math.round((d.tokensCached * 100) / d.tokensIn)}%` : '—'}</td>
-                <td className="r num">{d.cost > 0 ? `$${d.cost.toFixed(4)}` : '—'}</td>
+      {data.daily.length > 0 && (
+        <details className="card raw">
+          <summary>Tabla diaria detallada</summary>
+          <table className="stats-table">
+            <thead>
+              <tr>
+                <th>Día</th>
+                <th className="r">Mensajes</th>
+                <th className="r">Llamadas IA</th>
+                <th className="r">Tokens in</th>
+                <th className="r">Tokens out</th>
+                <th className="r">Cache</th>
+                <th className="r">Coste</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
+            </thead>
+            <tbody>
+              {[...data.daily].reverse().map((d) => (
+                <tr key={d.day}>
+                  <td>{d.day}</td>
+                  <td className="r num">{fmtInt(d.messages)}</td>
+                  <td
+                    className="r num"
+                    title={Object.entries(d.aiCalls).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                  >
+                    {fmtInt(sumCalls(d))}
+                  </td>
+                  <td className="r num">{fmtInt(d.tokensIn)}</td>
+                  <td className="r num">{fmtInt(d.tokensOut)}</td>
+                  <td className="r num">{d.tokensIn > 0 ? `${Math.round((d.tokensCached * 100) / d.tokensIn)}%` : '—'}</td>
+                  <td className="r num">{d.cost > 0 ? `$${d.cost.toFixed(4)}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
     </div>
   );
 }

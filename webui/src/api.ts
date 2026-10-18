@@ -17,7 +17,8 @@ async function post(url: string, body: unknown): Promise<void> {
 export const api = {
   config: () => fetch('/api/config').then((r) => json<AppConfig>(r)),
   status: () => fetch('/api/status').then((r) => json<StatusInfo>(r)),
-  stats: (days: number) => fetch(`/api/stats?days=${days}`).then((r) => json<StatsData>(r)),
+  stats: (hours: number) => fetch(`/api/stats?hours=${hours}`).then((r) => json<StatsData>(r)),
+  resetStats: () => post('/api/stats/reset', {}),
   memories: () => fetch('/api/memories').then((r) => json<{ memories: MemoryRow[] }>(r)),
   memory: (id: string) => fetch(`/api/memories/${id}`).then((r) => json<{ user_id: string; content: string }>(r)),
   saveConfig: (draft: ConfigDraft) => post('/api/update_config', draft),
