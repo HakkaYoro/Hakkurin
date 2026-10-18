@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { spawn } from 'child_process';
 import { PassThrough } from 'stream';
 import { StreamType, createAudioResource } from '@discordjs/voice';
@@ -15,6 +15,7 @@ const BUFFER_BYTES = 1024 * 1024;
 // antes de sonar. CPU modesto (i5-2400) + canal de voz 64k → 5s de colchón.
 const PREBUFFER_MS = 5_000;
 
+@Injectable()
 export class FfmpegAdapter implements AudioPipeline {
   private readonly logger = new Logger(FfmpegAdapter.name);
 
@@ -44,7 +45,13 @@ export class FfmpegAdapter implements AudioPipeline {
     s.ffmpeg = ff;
     // Drenar stderr: debug + evita que el pipe kernel (64KB) se llene en bucles de
     // error y atasque stdout (→ underrun → stutter).
-    ff.stderr.on('data', (d: Buffer) => this.logger.debug(`ffmpeg: ${d.toString().trim()}`));
+    let stderrTail = '';
+    ff.stderr.on('data', (d: Buffer) => {
+      const line = d.toString().trim();
+      if (!line) return;
+      stderrTail = `${stderrTail}\n${line}`.slice(-600);
+      this.logger.debug(`ffmpeg: ${line}`);
+    });
     ff.on('error', (e) => this.logger.error(`ffmpeg spawn falló: ${e.message}. ¿ffmpeg instalado?`));
     ff.once('exit', () => { if (s.ffmpeg === ff) s.ffmpeg = null; });
 
@@ -65,6 +72,13 @@ export class FfmpegAdapter implements AudioPipeline {
     // Abortado (/stop o skip) durante el pre-buffer: killCurrent ya pisó s.ffmpeg.
     // Sin este chequeo el play dispararía audio muerto sobre una sesión cancelada.
     if (s.ffmpeg !== ff) {
+      // Salida temprana por cuenta de ffmpeg (un /stop lo mata con SIGKILL y no
+      // entra aquí): la causa sólo existe en su stderr, invisible al nivel de prod.
+      if (ff.exitCode !== null || ff.signalCode === null) {
+        this.logger.warn(
+          `ffmpeg murió antes del play (exit=${ff.exitCode ?? ff.signalCode ?? 'spawn-fallido'}): ${stderrTail.trim() || 'sin stderr'}`,
+        );
+      }
       try { ff.kill('SIGKILL'); } catch {}
       return false;
     }

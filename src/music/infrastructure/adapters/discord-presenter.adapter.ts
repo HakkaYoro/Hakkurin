@@ -1,7 +1,9 @@
+import { Injectable } from '@nestjs/common';
 import { EmbedBuilder } from 'discord.js';
 import type { ChannelHandle } from '../../domain/music.domain';
 import type { MusicPresenter } from '../../domain/ports/music.ports';
 
+@Injectable()
 export class DiscordPresenterAdapter implements MusicPresenter {
   async nowPlaying(channel: ChannelHandle, title: string, coverUrl: string | null): Promise<void> {
     if (!coverUrl) {

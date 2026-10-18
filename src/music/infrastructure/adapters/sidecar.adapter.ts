@@ -1,5 +1,5 @@
 // NUNCA loguear la stream_url resuelta (embedea u/t/s de Navidrome); sólo la URL pública del item.
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '../../../common/config.service';
 import { delay } from '../../../common/util';
 import type { QueueItemVo } from '../../domain/music.domain';
@@ -11,6 +11,7 @@ const RESET_TIMEOUT_MS = 5_000;
 // extract que llegue en ese hueco se rechaza con ECONNREFUSED.
 const CONN_ERR_CODES = ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND'];
 
+@Injectable()
 export class SidecarAdapter extends StreamSource {
   private readonly logger = new Logger(SidecarAdapter.name);
 
