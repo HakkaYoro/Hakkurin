@@ -43,6 +43,8 @@ export class FfmpegAdapter implements AudioPipeline {
       '-loglevel', 'error', '-hide_banner', 'pipe:1',
     ]);
     s.ffmpeg = ff;
+    let outBytes = 0;
+    ff.stdout.on('data', (d: Buffer) => { outBytes += d.length; });
     // Drenar stderr: debug + evita que el pipe kernel (64KB) se llene en bucles de
     // error y atasque stdout (→ underrun → stutter).
     let stderrTail = '';
@@ -75,8 +77,9 @@ export class FfmpegAdapter implements AudioPipeline {
       // Salida temprana por cuenta de ffmpeg (un /stop lo mata con SIGKILL y no
       // entra aquí): la causa sólo existe en su stderr, invisible al nivel de prod.
       if (ff.exitCode !== null || ff.signalCode === null) {
+        // bytes=0 delata fuente que no entregó nada; len descarta URL truncada.
         this.logger.warn(
-          `ffmpeg murió antes del play (exit=${ff.exitCode ?? ff.signalCode ?? 'spawn-fallido'}): ${stderrTail.trim() || 'sin stderr'}`,
+          `ffmpeg murió antes del play (exit=${ff.exitCode ?? ff.signalCode ?? 'spawn-fallido'}, bytes=${outBytes}, len=${streamUrl.length}): ${stderrTail.trim() || 'sin stderr'}`,
         );
       }
       try { ff.kill('SIGKILL'); } catch {}
