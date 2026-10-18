@@ -85,7 +85,12 @@ export class ReminderService {
 
       this.executedActionsCache.set(key, nowSec);
       executed.push(action);
-      await this.memory.logSelfAction(`EJECUTÉ RECORDATORIO: ${actionDesc} para ${userName}`);
+      // Evento de sistema, no un turno: va sin la pareja [ELLOS DIJERON] y con el
+      // marcador exacto que el FILTRO CRITICO del prompt del self busca.
+      await this.memory.addInteraction(
+        BOT_SELF_ID,
+        `[SISTEMA] EJECUTÉ RECORDATORIO: ${actionDesc} para ${userName}`,
+      );
     }
 
     if (executed.length) {

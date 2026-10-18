@@ -128,16 +128,18 @@ ENTRADA:
 --- MEMORIA PREVIA ---
 ${currentSummary || 'Sin memoria previa (Tabula Rasa).'}
 
---- NUEVAS INTERACCIONES (Lo que acaba de pasar) ---
+--- REGISTRO DE INTERACCIONES (cada entrada: lo que dijeron ellos y lo que respondí yo) ---
 ${recentInteractions.join('\n')}
 
 INSTRUCCIONES CRÍTICAS:
 1. Analiza profundamente las nuevas interacciones en contexto con la memoria previa.
-2. NO hagas un resumen narrativo simple. Estructura la información para máxima utilidad.
-3. Sé explícita, detallada y técnica sobre tu propio estado y compromisos.
-4. NO USES EMOJIS en ninguna parte del reporte.
-5. Si detectas un compromiso con FECHA Y HORA específica, DEBES incluirlo en la sección JSON final.
-6. FILTRO CRITICO: Revisa las "NUEVAS INTERACCIONES". Si ves un mensaje que dice "EJECUTÉ RECORDATORIO: [X]", ENTONCES [X] YA ESTÁ HECHO. NO LO INCLUYAS EN EL JSON! Elimínalo de tu lista de pendientes.
+2. ATRIBUCIÓN (CRÍTICO): Cada entrada del registro tiene DOS líneas: "[ELLOS DIJERON] <usuario> (ID): ..." es texto que dijo un HUMANO; "[YO RESPONDÍ]: ..." es texto que HAKKURIN misma pronunció. NUNCA atribuyas a un usuario lo que aparece en [YO RESPONDÍ]: los apodos, halagos e insultos que ahí se leen los dijo Hakkurin, no ellos.
+3. Si algo no está en el registro, NO inventes qué dijo el usuario ni reconstruyas su turno.
+4. NO hagas un resumen narrativo simple. Estructura la información para máxima utilidad.
+5. Sé explícita, detallada y técnica sobre tu propio estado y compromisos.
+6. NO USES EMOJIS en ninguna parte del reporte.
+7. Si detectas un compromiso con FECHA Y HORA específica, DEBES incluirlo en la sección JSON final.
+8. FILTRO CRITICO: Si el registro contiene una línea "[SISTEMA] EJECUTÉ RECORDATORIO: [X]", ENTONCES [X] YA ESTÁ HECHO. NO LO INCLUYAS EN EL JSON! Elimínalo de tu lista de pendientes.
 
 FORMATO DE SALIDA (Markdown + JSON):
 

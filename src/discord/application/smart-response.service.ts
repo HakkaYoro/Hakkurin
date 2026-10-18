@@ -152,7 +152,12 @@ export class SmartResponseService {
     channelCtx.updateBotActivity();
     this.state.setLastActiveChannel(channelId);
 
-    const shouldSummarizeSelf = await this.memory.logSelfAction(fullResponseText.trim());
+    const shouldSummarizeSelf = await this.memory.logSelfAction(
+      userText,
+      userName,
+      userId,
+      fullResponseText.trim(),
+    );
     if (shouldSummarizeSelf) void this.state.performMemorySummarization(BOT_SELF_ID);
 
     void this.memory.updateLastChannel(userId, channelId);

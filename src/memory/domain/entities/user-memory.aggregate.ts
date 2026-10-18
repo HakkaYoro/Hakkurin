@@ -83,8 +83,10 @@ export function normalizeMemorySchema(raw: any): UserMemory {
   return normalized;
 }
 
-const SUMMARY_TRIGGER_SECONDS = 1800;
+const SUMMARY_TRIGGER_SECONDS = 1200;
 const SUMMARY_TRIGGER_INTERACTIONS = 20;
+// El cerebro (self) se refresca mucho más rápido que los perfiles de usuario.
+const SELF_TRIGGER_INTERACTIONS = 5;
 
 export class UserMemoryAggregate {
   private constructor(
@@ -101,18 +103,19 @@ export class UserMemoryAggregate {
   }
 
   /** El texto llega ya validado (no vacío). */
-  appendInteraction(text: string): boolean {
+  appendInteraction(text: string, isSelf = false): boolean {
     this.mem.history_buffer.push(text);
     this.mem.interaction_count += 1;
-    return this.needsSummary(Date.now() / 1000);
+    return this.needsSummary(Date.now() / 1000, isSelf);
   }
 
-  needsSummary(now: number): boolean {
-    const timeSinceLast = now - (this.mem.last_summary_time || 0);
-    return (
-      this.mem.history_buffer.length >= SUMMARY_TRIGGER_INTERACTIONS ||
-      (this.mem.history_buffer.length > 0 && timeSinceLast > SUMMARY_TRIGGER_SECONDS)
-    );
+  needsSummary(now: number, isSelf = false): boolean {
+    const trigger = isSelf ? SELF_TRIGGER_INTERACTIONS : SUMMARY_TRIGGER_INTERACTIONS;
+    if (this.mem.history_buffer.length >= trigger) return true;
+    // Sin resumen previo (last_summary_time=0) no hay base de tiempo: si no, la
+    // 1ª interacción de cada memoria nueva dispararía resumen inmediato.
+    if (!this.mem.last_summary_time) return false;
+    return this.mem.history_buffer.length > 0 && now - this.mem.last_summary_time > SUMMARY_TRIGGER_SECONDS;
   }
 
   /**

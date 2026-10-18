@@ -180,15 +180,18 @@ describe('parseAnalysisJson (mapper anti-corrupción)', () => {
 });
 
 describe('GeminiAdapter — generateSummary', () => {
-  it('self-memory: prompt de conciencia interna y devuelve el texto', async () => {
+  it('self-memory: prompt de conciencia interna con reglas de atribución y devuelve el texto', async () => {
     const generateContent = vi.fn().mockResolvedValue({ text: '### ESTADO\nenergía alta' });
     const p = makeProvider(generateContent);
-    const out = await p.generateSummary('memoria previa', ['[YO DIJE/HICE]: x'], 'hakkurin_internal_self');
+    const entrada = '[ELLOS DIJERON] Hakka (ID: 321): hola\n[YO RESPONDÍ]: hola hakka-sama';
+    const out = await p.generateSummary('memoria previa', [entrada], 'hakkurin_internal_self');
     expect(out).toBe('### ESTADO\nenergía alta');
     const arg = generateContent.mock.calls[0][0];
     expect(arg.contents).toContain('SISTEMA DE CONCIENCIA Y MEMORIA');
     expect(arg.contents).toContain('memoria previa');
-    expect(arg.contents).toContain('[YO DIJE/HICE]: x');
+    expect(arg.contents).toContain(entrada);
+    expect(arg.contents).toContain('NUNCA atribuyas a un usuario lo que aparece en [YO RESPONDÍ]');
+    expect(arg.contents).toContain('NO inventes qué dijo el usuario');
   });
 
   it('perfil de usuario: prompt de gestor de memoria con el ID del usuario', async () => {

@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { EncryptorPort, MemoryQueuePort, MemoryRepositoryPort } from '../domain/ports/memory.ports';
 import { UserMemory, UserMemoryAggregate } from '../domain/entities/user-memory.aggregate';
 
-const STALE_BUFFER_SECONDS = 1800;
+const STALE_BUFFER_SECONDS = 1200;
 
 export const BOT_SELF_ID = 'hakkurin_internal_self';
 
@@ -33,7 +33,7 @@ export class MemoryService implements OnModuleInit {
     if (!text) return false;
 
     const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id), user_id);
-    const shouldSummarize = agg.appendInteraction(text);
+    const shouldSummarize = agg.appendInteraction(text, user_id === BOT_SELF_ID);
     await this.repo.saveMemory(user_id, agg.raw);
     return shouldSummarize;
   }
@@ -48,8 +48,20 @@ export class MemoryService implements OnModuleInit {
     return mem.summary || 'Sin memoria interna previa.';
   }
 
-  async logSelfAction(actionText: string): Promise<boolean> {
-    return this.addInteraction(BOT_SELF_ID, `[YO DIJE/HICE]: ${actionText}`);
+  /** El buffer del self guarda los DOS lados del turno: sin la línea
+   *  [ELLOS DIJERON] el resumen inventa qué dijo el usuario a partir de la
+   *  propia respuesta (atribución invertida). */
+  async logSelfAction(
+    userText: string,
+    userName: string,
+    userId: string,
+    responseText: string,
+  ): Promise<boolean> {
+    const said = userText.trim() || '(sin texto / sólo imagen)';
+    return this.addInteraction(
+      BOT_SELF_ID,
+      `[ELLOS DIJERON] ${userName} (ID: ${userId}): ${said}\n[YO RESPONDÍ]: ${responseText}`,
+    );
   }
 
   async getBufferAndSummary(user_id: string): Promise<{ summary: string; buffer: string[] }> {

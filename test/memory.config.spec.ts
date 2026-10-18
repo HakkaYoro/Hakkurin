@@ -6,6 +6,7 @@ import { CryptoAdapter } from '../src/memory/infrastructure/persistence/crypto.a
 import { MemoryRepositoryAdapter } from '../src/memory/infrastructure/persistence/memory-repository.adapter';
 import { MemoryQueueAdapter } from '../src/memory/infrastructure/persistence/memory-queue.adapter';
 import { MemoryService, BOT_SELF_ID } from '../src/memory/application/memory.service';
+import { UserMemoryAggregate } from '../src/memory/domain/entities/user-memory.aggregate';
 
 describe('CryptoAdapter', () => {
   let c: CryptoAdapter;
@@ -94,16 +95,53 @@ describe('MemoryService', () => {
     await fsPromises.writeFile('data/memory/queue.json', JSON.stringify([{ user_id: '3', text: 'viejo', timestamp: 0 }]));
 
     const promoted = await mem.processQueue();
-    expect(promoted).toEqual(['3']); // >300s → promovido y trigger
+    // Promociona a history_buffer pero sin resumen previo (last_summary_time=0)
+    // no dispara resumen directo: lo cubre checkStaleBuffers (20 min).
+    expect(promoted).toEqual([]);
     expect(await mem.getQueuedInteractions('3')).toEqual([]);
+    expect((await mem.getBufferAndSummary('3')).buffer).toEqual(['viejo']);
   });
 
-  it('self-memory: logSelfAction + getSelfMemory', async () => {
-    await mem.logSelfAction('probé algo');
+  it('self-memory: logSelfAction registra ambos lados del turno', async () => {
+    await mem.logSelfAction('hola', 'Hakka', '321', 'hola hakka-sama');
     // todavía no hay summary (solo buffer)
     expect(await mem.getSelfMemory()).toBe('Sin memoria interna previa.');
-    await mem.updateSummary(BOT_SELF_ID, 'hoy probé algo', ['[YO DIJE/HICE]: probé algo']);
+    const buffer = (await mem.getBufferAndSummary(BOT_SELF_ID)).buffer;
+    expect(buffer).toEqual(['[ELLOS DIJERON] Hakka (ID: 321): hola\n[YO RESPONDÍ]: hola hakka-sama']);
+    await mem.updateSummary(BOT_SELF_ID, 'hoy probé algo', [
+      '[ELLOS DIJERON] Hakka (ID: 321): hola\n[YO RESPONDÍ]: hola hakka-sama',
+    ]);
     expect(await mem.getSelfMemory()).toBe('hoy probé algo');
+  });
+
+  it('logSelfAction sin texto marca (sin texto / sólo imagen)', async () => {
+    await mem.logSelfAction('   ', 'Hakka', '321', 'ok');
+    const buffer = (await mem.getBufferAndSummary(BOT_SELF_ID)).buffer;
+    expect(buffer[0]).toContain('[ELLOS DIJERON] Hakka (ID: 321): (sin texto / sólo imagen)');
+  });
+
+  it('cadencia: el self se resume a las 5 interacciones, los usuarios a las 20', () => {
+    const selfAgg = UserMemoryAggregate.fromRaw({});
+    let out = false;
+    for (let i = 0; i < 5; i++) out = selfAgg.appendInteraction('x', true);
+    expect(out).toBe(true);
+
+    const userAgg = UserMemoryAggregate.fromRaw({});
+    let u = false;
+    for (let i = 0; i < 19; i++) u = userAgg.appendInteraction('x');
+    expect(u).toBe(false);
+    expect(userAgg.appendInteraction('x')).toBe(true);
+  });
+
+  it('sin resumen previo la 1ª interacción no dispara resumen; con resumen viejo (>20 min) sí', () => {
+    const fresh = UserMemoryAggregate.fromRaw({});
+    expect(fresh.appendInteraction('x')).toBe(false);
+
+    const aged = UserMemoryAggregate.fromRaw({
+      history_buffer: ['y'],
+      last_summary_time: Date.now() / 1000 - 1300,
+    });
+    expect(aged.needsSummary(Date.now() / 1000)).toBe(true);
   });
 
   it('addInteraction con texto null/vacío → false y no persiste nada', async () => {
