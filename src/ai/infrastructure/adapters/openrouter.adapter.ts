@@ -127,7 +127,7 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
     const usage: any = (res as any).usage;
     if (usage) {
       const cached = usage.promptTokensDetails?.cachedTokens ?? 0;
-      this.stats.addTokens(usage.promptTokens ?? 0, usage.completionTokens ?? 0, cached, usage.cost ?? 0);
+      this.stats.addTokens(usage.promptTokens ?? 0, usage.completionTokens ?? 0, cached, usage.cost ?? 0, model);
       if (cached > 0) this.logger.debug(`Prompt cache hit de OpenRouter: ${cached} tokens`);
     }
 

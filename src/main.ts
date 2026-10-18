@@ -1,8 +1,10 @@
 import http from 'node:http';
 import https from 'node:https';
 import { setDefaultResultOrder } from 'node:dns';
+import { join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { LogTeeService } from './web/infrastructure/log-tee.service';
 
@@ -14,7 +16,10 @@ async function bootstrap() {
   https.globalAgent = new https.Agent({ family: 4 });
   setDefaultResultOrder('ipv4first');
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // SPA de la WebUI compilado por vite a dist/webui. index:false: GET / pasa por
+  // WebController para respetar el AuthGuard; los assets con hash sí son estáticos.
+  app.useStaticAssets(join(__dirname, 'webui'), { index: false });
   // LogTee como logger global: además de stdout, ring buffer para GET /logs de la WebUI.
   const logTee = app.get(LogTeeService);
   app.useLogger(logTee);

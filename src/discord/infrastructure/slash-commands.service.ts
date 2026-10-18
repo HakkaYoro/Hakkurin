@@ -7,6 +7,7 @@ import {
 } from 'discord.js';
 import { MusicService } from '../../music/application/music.service';
 import { MusicUiService } from './music-ui.service';
+import { StatsService } from '../../stats/stats.service';
 
 @Injectable()
 export class SlashCommandsService {
@@ -15,6 +16,7 @@ export class SlashCommandsService {
   constructor(
     private readonly music: MusicService,
     private readonly musicUi: MusicUiService,
+    private readonly stats: StatsService,
   ) {}
 
   async register(client: Client): Promise<void> {
@@ -47,6 +49,7 @@ export class SlashCommandsService {
   }
 
   private async handleCommand(i: ChatInputCommandInteraction): Promise<void> {
+    this.stats.bumpCommand(i.commandName, i.user.id);
     switch (i.commandName) {
       case 'play':
         return this.music.play(i, i.options.getString('url', true));

@@ -24,8 +24,9 @@ function makeFakes(over: Record<string, any> = {}) {
     ...over.navidrome,
   } as any;
   const musicUi = new MusicUiService(music, navidrome);
-  const svc = new SlashCommandsService(music, musicUi);
-  return { svc, music, navidrome, musicUi };
+  const stats = { bumpCommand: vi.fn(), bumpAiCall: vi.fn(), addTokens: vi.fn() };
+  const svc = new SlashCommandsService(music, musicUi, stats as any);
+  return { svc, music, navidrome, musicUi, stats };
 }
 
 function chatInteraction(over: Record<string, any> = {}) {
@@ -33,6 +34,7 @@ function chatInteraction(over: Record<string, any> = {}) {
     isChatInputCommand: () => true,
     isMessageComponent: () => false,
     commandName: 'play',
+    user: { id: 'u1' },
     options: { getString: vi.fn(() => 'https://youtu.be/x') },
     deferred: false,
     deferReply: vi.fn(async () => {}),
@@ -80,6 +82,12 @@ describe('SlashCommandsService — registro y ruteo', () => {
     expect(navidrome.search).toHaveBeenCalledWith('metal', 5);
   });
 
+  it('cada comando se registra en stats con su usuario', async () => {
+    const { svc, stats } = makeFakes();
+    await svc.handle(chatInteraction());
+    expect(stats.bumpCommand).toHaveBeenCalledWith('play', 'u1');
+  });
+
   it('componentes van a handleButton; el rechazo del handler sube a bindEvents (.catch)', async () => {
     const { svc, music } = makeFakes();
     music.play.mockRejectedValueOnce(new Error('boom'));
@@ -104,6 +112,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
       isChatInputCommand: () => true,
       isMessageComponent: () => false,
       commandName: 'search',
+      user: { id: 'u1' },
       options: { getString: vi.fn(() => 'metal') },
       deferred,
       deferReply: vi.fn(async () => {}),

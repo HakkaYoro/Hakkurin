@@ -34,11 +34,14 @@ el original queda en la rama `legacy-python`.
   (Subsonic): `/play /skip /stop /queue /search /radio`, radio con auto-prefetch,
   ffmpeg → Opus 48k directo, `/stop` con epoch + abort + reset del sidecar y
   auto-actualización horaria de yt-dlp sin re-buildear imagen.
-- **WebUI** — dashboard server-rendered oscuro con pestañas: config en vivo (secretos
-  write-only), status card del bot (conexión, uptime, proveedor IA) refrescada cada 30s,
-  tabla de **estadísticas** (mensajes/día, llamadas IA por tipo, tokens con/sin caché y
-  coste en créditos), browse y borrado de memorias y **Exportar Logs** (ring buffer en
-  memoria, descarga `hakkurin.log` protegida por el mismo AuthGuard HTTP Basic opt-in).
+- **WebUI (React + Vite)** — SPA oscura servida por el bot (API JSON + bundle en
+  `dist/webui`): config en vivo con subtabs (el bloque de IA cambia según el proveedor,
+  secretos write-only), status card refrescada cada 30s, dashboard de **estadísticas**
+  (KPIs con delta vs período anterior, gráfica de actividad, donut de caché, heatmap
+  diario, leaderboard con avatar/nickname/ID, modelos usados y comandos con su top
+  usuario), browse y borrado de memorias con nombre visible y **Exportar Logs** (ring
+  buffer en memoria, descarga `hakkurin.log` protegida por el mismo AuthGuard HTTP
+  Basic opt-in).
 - **Reconexión automática** — login con reintento indefinido, watchdog que recrea el
   cliente si el gateway queda zombie ~3 min, handlers de shard con logs y
   `unhandledRejection`/`uncaughtException` capturados: un corte de red ya no mata al bot.
@@ -54,9 +57,9 @@ el original queda en la rama `legacy-python`.
 ## Stack
 
 NestJS 11 · discord.js 14 · @discordjs/voice · @google/genai · @openrouter/sdk ·
-@nestjs/event-emitter · zod · nunjucks · vitest · AES-256-GCM vía `node:crypto`. Dos
-imágenes en GHCR: `bot` (~450 MB, ffmpeg estático) y `sidecar` (~210 MB,
-python:3.11-slim + yt-dlp).
+@nestjs/event-emitter · zod · React 18 + Vite (WebUI) · vitest · AES-256-GCM vía
+`node:crypto`. Dos imágenes en GHCR: `bot` (~450 MB, ffmpeg estático) y `sidecar`
+(~210 MB, python:3.11-slim + yt-dlp).
 
 ## Despliegue (NAS / servidor)
 
@@ -124,8 +127,9 @@ eventos y **puertos** como abstract classes), `application/` (use-cases) e
 ```
 src/
   common/        ConfigService @Global (data/config.json atómico, sidecarUrl())
-  stats/         StatsService @Global: mensajes, llamadas IA y tokens/coste por día
-                 (flush atómico a data/stats.json)
+  stats/         StatsService @Global: mensajes/usuarios, comandos, modelos y
+                 tokens/coste por día (flush atómico a data/stats.json; rankings
+                 agregados para la WebUI)
   ai/            puerto AiBrain; RoutingBrain delega a GeminiAdapter u
                  OpenRouterAdapter según ai_provider (hot-swap); mapper zod de la
                  salida del LLM
@@ -139,8 +143,9 @@ src/
   music/         GuildMusicState + QueueItemVo; puertos de voz/audio/stream;
                  adaptadores @discordjs/voice, ffmpeg, sidecar yt-dlp, presenter
   navidrome/     SongVo + NavidromeAdapter (cliente Subsonic, CatalogPort)
-  web/           WebUI nunjucks (pestañas, status, stats), AuthGuard, LogTee
+  web/           API JSON + SPA shell del WebUI (AuthGuard, LogTee)
 sidecar/         FastAPI + yt-dlp: /extract, /version, /update, /reset
+webui/           React + Vite: la SPA del WebUI (build a dist/webui vía npm run build)
 test/            specs de vitest, un archivo por módulo (cwd tmp aislado)
 ```
 

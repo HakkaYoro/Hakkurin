@@ -1,15 +1,20 @@
 // Secretos write-only (bot_token/gemini_keys/navidrome_password/openrouter_api_key/
-// webui_token) jamás se hacen echo al DOM ni a /status; la única protección de
-// entrada es el AuthGuard opt-in.
-import { Body, Controller, Get, Header, Inject, Logger, Param, Post, Redirect, UseGuards } from '@nestjs/common';
+// webui_token) jamás se hacen echo a la API; la única protección de entrada es el
+// AuthGuard opt-in.
+import { Body, Controller, Get, Header, HttpCode, Inject, Logger, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
+import { join } from 'node:path';
 import { ConfigService } from '../../common/config.service';
 import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';
 import { BotLifecycle } from '../application/ports/bot-lifecycle.port';
+import type { MemberInfo } from '../application/ports/bot-lifecycle.port';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { StatsService } from '../../stats/stats.service';
-import { ViewService } from './view.service';
 import { AuthGuard } from './auth.guard';
 import { LogTeeService } from './log-tee.service';
+
+// El controller compila a dist/web/infrastructure/ → el SPA queda en dist/webui.
+const WEBUI_DIR = join(__dirname, '..', '..', 'webui');
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -21,19 +26,25 @@ export class WebController {
     private readonly memory: MemoryService,
     @Inject(BotLifecycle) private readonly discord: BotLifecycle,
     @Inject(AiBrain) private readonly brain: AiBrain,
-    private readonly view: ViewService,
     private readonly logTee: LogTeeService,
     private readonly stats: StatsService,
   ) {}
 
   @Get()
-  root(): string {
+  root(@Res() res: Response): void {
+    res.sendFile('index.html', { root: WEBUI_DIR }, (err) => {
+      if (err && !res.headersSent) res.status(503).send('WebUI sin construir — ejecuta `npm run build`.');
+    });
+  }
+
+  @Get('api/config')
+  apiConfig() {
     const c = this.config.getAll();
-    return this.view.render('index.html', {
-      bot_name: c.bot_name,
-      system_prompt: c.system_prompt,
-      reply_probability: c.reply_probability,
-      developer_id: c.developer_id,
+    return {
+      bot_name: c.bot_name ?? '',
+      system_prompt: c.system_prompt ?? '',
+      reply_probability: c.reply_probability ?? 0.125,
+      developer_id: c.developer_id ?? '',
       allowed_channels: (c.allowed_channels ?? []).join('\n'),
       ai_provider: c.ai_provider ?? 'gemini',
       openrouter_chat_model: c.openrouter_chat_model ?? '',
@@ -52,13 +63,11 @@ export class WebController {
       has_webui_token: !!c.webui_token,
       gemini_keys_count: (c.gemini_keys ?? []).length,
       openrouter_configured: !!(c.openrouter_api_key && c.openrouter_chat_model),
-      bot: this.discord.getStatus(),
-      stats: this.stats.snapshot(),
-    });
+    };
   }
 
   // Sólo flags/contadores: jamás valores de secretos.
-  @Get('status')
+  @Get('api/status')
   status() {
     const c = this.config.getAll();
     return {
@@ -71,9 +80,35 @@ export class WebController {
     };
   }
 
-  @Post('update_config')
-  @Redirect('/?saved=true', 303)
-  async updateConfig(@Body() body: any): Promise<void> {
+  @Get('api/stats')
+  async statsData(@Query('days') daysParam?: string) {
+    const r = this.stats.rankings(daysParam === '30' ? 30 : 7);
+    const cache = new Map<string, MemberInfo>();
+    // Resolución en secuencia: mismo userId en varios rankings → una sola llamada.
+    const ids = new Set<string>(r.users.map((u) => u.id));
+    for (const c of r.commands) if (c.topUserId) ids.add(c.topUserId);
+    for (const id of ids) await this.resolveMember(id, cache);
+    const users = r.users.map((u) => ({ ...cache.get(u.id)!, messages: u.messages }));
+    const commands = r.commands.map((c) => ({
+      command: c.command,
+      count: c.count,
+      topUser: c.topUserId ? { ...cache.get(c.topUserId)!, count: c.topUserCount } : null,
+    }));
+    return { ...r, users, commands };
+  }
+
+  private async resolveMember(userId: string, cache: Map<string, MemberInfo>): Promise<MemberInfo> {
+    let m = cache.get(userId);
+    if (!m) {
+      m = (await this.discord.getMemberInfo(userId)) ?? { id: userId, name: userId, avatarUrl: null };
+      cache.set(userId, m);
+    }
+    return m;
+  }
+
+  @Post('api/update_config')
+  @HttpCode(200)
+  async updateConfig(@Body() body: any): Promise<{ ok: true }> {
     for (const key of ['bot_name', 'system_prompt', 'developer_id']) {
       if (body[key] != null) await this.config.set(key, String(body[key]));
     }
@@ -83,7 +118,6 @@ export class WebController {
         body.allowed_channels.split('\n').map((s: string) => s.trim()).filter(Boolean),
       );
     }
-    // checkbox: el formulario sólo envía 'on' si está marcado; ausente → false.
     await this.config.set('deafen_move_enabled', Boolean(body.deafen_move_enabled));
     if (body.ai_provider === 'gemini' || body.ai_provider === 'openrouter') {
       await this.config.set('ai_provider', body.ai_provider);
@@ -123,6 +157,7 @@ export class WebController {
         this.logger.warn(`reload AI tras update_config: ${(e as Error).message}`);
       }
     }
+    return { ok: true };
   }
 
   // Dump seguro por diseño: el código jamás loguea secrets/stream_urls.
@@ -133,39 +168,50 @@ export class WebController {
     return this.logTee.text();
   }
 
-  @Post('restart')
-  @Redirect('/?restarted=true', 303)
-  restart(): void {
+  @Post('api/restart')
+  @HttpCode(200)
+  restart(): { ok: true } {
     // .catch(): reloadConfig/start pueden lanzar; un unhandledRejection mata el proceso.
     void this.discord
       .forceShutdownAndSummarize()
       .then(() => this.discord.restart())
       .catch((e) => this.logger.error(`Error en reinicio: ${(e as Error).message}`));
+    return { ok: true };
   }
 
-  @Get('memories')
-  async memories(): Promise<string> {
-    return this.view.render('memories.html', { memories: await this.memory.listMemories() });
+  @Get('api/memories')
+  async memories() {
+    const rows = await this.memory.listMemories();
+    const memories = await Promise.all(
+      rows.map(async (m) => {
+        if (m.is_self) return { ...m, name: 'Memoria interna', avatarUrl: null };
+        const info = await this.discord.getMemberInfo(m.user_id);
+        return { ...m, name: info?.name ?? m.user_id, avatarUrl: info?.avatarUrl ?? null };
+      }),
+    );
+    return { memories };
   }
 
-  @Get('memories/:user_id')
-  async memoryView(@Param('user_id') userId: string): Promise<string> {
+  @Get('api/memories/:user_id')
+  async memoryView(@Param('user_id') userId: string) {
     const content =
       userId === BOT_SELF_ID
         ? await this.memory.getSelfMemory()
         : (await this.memory.getMemorySummary(userId)) || 'Sin resumen generado aún.';
-    return this.view.render('memory_view.html', { user_id: userId, content });
+    return { user_id: userId, content };
   }
 
-  @Post('memories/delete_all')
-  @Redirect('/memories?deleted=all', 303)
-  async deleteAllMemories(): Promise<void> {
+  @Post('api/memories/delete_all')
+  @HttpCode(200)
+  async deleteAllMemories(): Promise<{ ok: true }> {
     await this.memory.deleteAllMemories();
+    return { ok: true };
   }
 
-  @Post('memories/:user_id/delete')
-  @Redirect('/memories?deleted=single', 303)
-  async deleteMemory(@Param('user_id') userId: string): Promise<void> {
+  @Post('api/memories/:user_id/delete')
+  @HttpCode(200)
+  async deleteMemory(@Param('user_id') userId: string): Promise<{ ok: true }> {
     await this.memory.deleteMemory(userId);
+    return { ok: true };
   }
 }

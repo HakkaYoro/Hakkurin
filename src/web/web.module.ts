@@ -5,7 +5,6 @@ import { MemoryModule } from '../memory/memory.module';
 import { AiModule } from '../ai/ai.module';
 import { BotLifecycle } from './application/ports/bot-lifecycle.port';
 import { WebController } from './infrastructure/web.controller';
-import { ViewService } from './infrastructure/view.service';
 import { AuthGuard } from './infrastructure/auth.guard';
 import { LogTeeService } from './infrastructure/log-tee.service';
 
@@ -14,7 +13,6 @@ import { LogTeeService } from './infrastructure/log-tee.service';
   imports: [DiscordModule, MemoryModule, AiModule],
   controllers: [WebController],
   providers: [
-    ViewService,
     AuthGuard,
     LogTeeService, // registrado como logger global en main.ts (app.get + useLogger)
     // useExisting exige que un módulo importado exporte DiscordAdapter.

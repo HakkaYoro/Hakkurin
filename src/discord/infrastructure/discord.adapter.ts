@@ -35,7 +35,7 @@ import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort, SendOptions } from '../domain/ports/message-transport.port';
 import { BotLifecycle } from '../../web/application/ports/bot-lifecycle.port';
-import type { BotStatus } from '../../web/application/ports/bot-lifecycle.port';
+import type { BotStatus, MemberInfo } from '../../web/application/ports/bot-lifecycle.port';
 
 @Injectable()
 export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTransportPort, BotStatePort, BotLifecycle {
@@ -229,9 +229,9 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
   private async onMessage(message: Message): Promise<void> {
     if (!message.author || message.author.bot) return;
     if (!message.channel) return;
-    this.stats.bumpMessages();
-    const channelId = message.channel.id;
     const userId = message.author.id;
+    this.stats.bumpMessage(userId);
+    const channelId = message.channel.id;
 
     const allowed = this.config.get<string[]>('allowed_channels', []);
     const isDm = message.guild === null;
@@ -461,6 +461,32 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
   async fetchUsername(userId: string): Promise<string | null> {
     try {
       return (await this.client?.users.fetch(userId))?.username ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Nombre visible + avatar para la WebUI (rankings y memorias).
+  // ponytail: se asume un guild; upgrade path: elegir por guildId del contexto.
+  async getMemberInfo(userId: string): Promise<MemberInfo | null> {
+    try {
+      if (!this.client) return null;
+      for (const guild of this.client.guilds.cache.values()) {
+        const m = guild.members.cache.get(userId);
+        if (m) {
+          return { id: m.id, name: m.displayName, avatarUrl: m.user.displayAvatarURL({ extension: 'png', size: 64 }) };
+        }
+      }
+      const guild = this.client.guilds.cache.first();
+      const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+      if (member) {
+        return { id: member.id, name: member.displayName, avatarUrl: member.user.displayAvatarURL({ extension: 'png', size: 64 }) };
+      }
+      const user = await this.client.users.fetch(userId).catch(() => null);
+      if (user) {
+        return { id: userId, name: user.displayName, avatarUrl: user.displayAvatarURL({ extension: 'png', size: 64 }) };
+      }
+      return null;
     } catch {
       return null;
     }

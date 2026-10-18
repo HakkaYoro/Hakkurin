@@ -124,10 +124,10 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
     this.gemmaTokensThisMinute += tokens;
   }
 
-  private registerUsage(response: any): void {
+  private registerUsage(response: any, modelName: string): void {
     const u = response?.usageMetadata;
     if (!u) return;
-    this.stats.addTokens(u.promptTokenCount ?? 0, u.candidatesTokenCount ?? 0, u.cachedContentTokenCount ?? 0);
+    this.stats.addTokens(u.promptTokenCount ?? 0, u.candidatesTokenCount ?? 0, u.cachedContentTokenCount ?? 0, 0, modelName);
   }
 
   private async generateWithRetry(
@@ -188,7 +188,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
             contents: prompt,
             config: currentConfig,
           });
-          this.registerUsage(response);
+          this.registerUsage(response, modelName);
 
           // Two-pass: si el modelo pidió web_search, ejecutar y re-llamar.
           const fcs = response.functionCalls;
@@ -219,7 +219,7 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
                 ],
                 config: secondConfig,
               });
-              this.registerUsage(response);
+              this.registerUsage(response, modelName);
             }
           }
 
