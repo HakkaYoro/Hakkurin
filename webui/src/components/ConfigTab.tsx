@@ -110,6 +110,15 @@ function GeneralSection({ form, set, setSecret }: SectionProps) {
         <label htmlFor="f-bot-name">Nombre del bot</label>
         <input id="f-bot-name" value={form.bot_name} onChange={(e) => set('bot_name', e.target.value)} />
       </div>
+      <div className="form-group">
+        <label htmlFor="f-contact">Contacto para APIs externas</label>
+        <input
+          id="f-contact"
+          value={form.bot_contact}
+          onChange={(e) => set('bot_contact', e.target.value)}
+          placeholder="email o URL del repo — va en el User-Agent (nekos.best lo exige)"
+        />
+      </div>
       <div className="form-row">
         <div className="form-group">
           <label htmlFor="f-dev">ID del desarrollador</label>

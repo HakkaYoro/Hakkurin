@@ -9,6 +9,7 @@ export interface HakkurinConfig {
   bot_token: string;
   gemini_keys: string[];
   bot_name: string;
+  bot_contact?: string;
   allowed_channels: string[];
   system_prompt: string;
   reply_probability: number;
@@ -35,6 +36,8 @@ const DEFAULTS: HakkurinConfig = {
   bot_token: '',
   gemini_keys: [],
   bot_name: 'Hakkurin',
+  // Contacto para el User-Agent ante APIs externas (nekos.best bloquea UAs sin contacto real).
+  bot_contact: 'hackeryolo.hy@gmail.com',
   allowed_channels: [],
   system_prompt:
     'Eres Hakkurin, una chica usuaria de Discord con una personalidad e-girl, otaku y fujoshi. Te gusta el anime, el manga y usar emoticonos. Eres sarcástica pero amigable si te tratan bien. Si te ignoran, dejas de hablar. Tienes memoria de con quién hablas.',

@@ -51,6 +51,7 @@ export class WebController {
     const c = this.config.getAll();
     return {
       bot_name: c.bot_name ?? '',
+      bot_contact: c.bot_contact ?? '',
       system_prompt: c.system_prompt ?? '',
       reply_probability: c.reply_probability ?? 0.125,
       developer_id: c.developer_id ?? '',
@@ -135,7 +136,7 @@ export class WebController {
   @Post('api/update_config')
   @HttpCode(200)
   async updateConfig(@Body() body: any): Promise<{ ok: true }> {
-    for (const key of ['bot_name', 'system_prompt', 'developer_id']) {
+    for (const key of ['bot_name', 'bot_contact', 'system_prompt', 'developer_id']) {
       if (body[key] != null) await this.config.set(key, String(body[key]));
     }
     if (typeof body.allowed_channels === 'string') {

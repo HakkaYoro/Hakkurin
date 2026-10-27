@@ -22,6 +22,7 @@ export interface StatusInfo {
 
 export interface AppConfig {
   bot_name: string;
+  bot_contact: string;
   system_prompt: string;
   reply_probability: number;
   developer_id: string;

@@ -15,7 +15,6 @@ import {
   type NekosHit,
 } from '../domain/fun.domain';
 
-const UA = 'Hakkurin/1.0 (Discord bot)';
 const logger = new Logger('fun');
 
 // Paleta otaku: info=violeta, waifu/acción=rosa, ship=fucsia.
@@ -24,10 +23,10 @@ const COLOR_WAIFU = 0xff69b4;
 const COLOR_SHIP = 0xe91e63;
 
 //ponytail: fetch sin cache ni retry; Jikan rate-limit 60/min sobra para un bot casero. Upgrade: cache TTL si esto crece.
-async function jikanGet(path: string): Promise<any | null> {
+async function jikanGet(path: string, ua: string): Promise<any | null> {
   try {
     const res = await fetch(`https://api.jikan.moe/v4${path}`, {
-      headers: { 'User-Agent': UA },
+      headers: { 'User-Agent': ua },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
@@ -41,10 +40,10 @@ async function jikanGet(path: string): Promise<any | null> {
   }
 }
 
-async function nekosGet(cat: string): Promise<NekosHit | null> {
+async function nekosGet(cat: string, ua: string): Promise<NekosHit | null> {
   try {
     const res = await fetch(`https://nekos.best/api/v2/${cat}?amount=8`, {
-      headers: { 'User-Agent': UA },
+      headers: { 'User-Agent': ua },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
@@ -64,6 +63,11 @@ async function nekosGet(cat: string): Promise<NekosHit | null> {
 export class FunService {
   constructor(private readonly config: ConfigService) {}
 
+  // nekos.best bloquea UAs genéricos/placeholder ("Discord bot"); exige APP_NAME (CONTACTO) real.
+  private get ua(): string {
+    return `Hakkurin/1.0 (${this.config.get<string>('bot_contact')})`;
+  }
+
   private footer(e: EmbedBuilder): EmbedBuilder {
     return e.setFooter({ text: `${this.config.get('bot_name', 'Hakkurin')} ♡` }).setTimestamp();
   }
@@ -74,7 +78,7 @@ export class FunService {
 
   async handleAnime(i: ChatInputCommandInteraction, query: string): Promise<void> {
     await i.deferReply().catch(() => {});
-    const json = await jikanGet(`/anime?q=${encodeURIComponent(query)}&limit=1&sfw=true`);
+    const json = await jikanGet(`/anime?q=${encodeURIComponent(query)}&limit=1&sfw=true`, this.ua);
     const a = json?.data?.[0];
     if (!a) {
       await i.editReply({ embeds: [this.errorEmbed(`No encontré "${query}"... ¿lo soñaste, baka?`)] }).catch(() => {});
@@ -100,7 +104,7 @@ export class FunService {
 
   async handleManga(i: ChatInputCommandInteraction, query: string): Promise<void> {
     await i.deferReply().catch(() => {});
-    const json = await jikanGet(`/manga?q=${encodeURIComponent(query)}&limit=1&sfw=true`);
+    const json = await jikanGet(`/manga?q=${encodeURIComponent(query)}&limit=1&sfw=true`, this.ua);
     const m = json?.data?.[0];
     if (!m) {
       await i.editReply({ embeds: [this.errorEmbed(`No encontré "${query}" en los mangas...`)] }).catch(() => {});
@@ -127,7 +131,7 @@ export class FunService {
 
   async handleTemporada(i: ChatInputCommandInteraction): Promise<void> {
     await i.deferReply().catch(() => {});
-    const json = await jikanGet('/seasons/now?sfw=true&limit=10');
+    const json = await jikanGet('/seasons/now?sfw=true&limit=10', this.ua);
     const animes: any[] = json?.data ?? [];
     if (!animes.length) {
       await i.editReply({ embeds: [this.errorEmbed('Jikan no respondió, inténtalo luego.')] }).catch(() => {});
@@ -150,7 +154,7 @@ export class FunService {
       await i.editReply({ embeds: [this.errorEmbed('Esa categoría no existe, baka.')] }).catch(() => {});
       return;
     }
-    const hit = await nekosGet(category);
+    const hit = await nekosGet(category, this.ua);
     if (!hit) {
       await i.editReply({ embeds: [this.errorEmbed('nekos.best no respondió, inténtalo luego... quédate con tu imaginación por hoy.')] }).catch(() => {});
       return;
@@ -172,7 +176,7 @@ export class FunService {
       await i.editReply({ embeds: [this.errorEmbed('No conozco esa acción, baka.')] }).catch(() => {});
       return;
     }
-    const hit = await nekosGet(accion.cat);
+    const hit = await nekosGet(accion.cat, this.ua);
     const autor = i.user.displayName ?? i.user.username;
     const objetivo = targetId ? `<@${targetId}>` : null;
     const frase = objetivo ? `**${autor}** ${accion.con} ${objetivo}` : `**${autor}** ${accion.solo}`;
@@ -187,7 +191,7 @@ export class FunService {
     const auto = u1.id === u2.id;
     const pct = auto ? 100 : shipPercent(u1.id, u2.id);
     const { cat, veredicto } = shipTags(pct);
-    const hit = await nekosGet(cat);
+    const hit = await nekosGet(cat, this.ua);
     const hearts = Math.round(pct / 10);
     const bar = '❤️'.repeat(hearts) + '🖤'.repeat(10 - hearts);
     const nombre = (u: User) => u.displayName ?? u.username;
