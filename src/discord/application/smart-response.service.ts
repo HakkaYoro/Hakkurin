@@ -2,6 +2,7 @@ import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import { InteractionAnsweredEvent, INTERACTION_ANSWERED } from '../../ai/domain/events/interaction-answered.event';
+import { ACCIONES } from '../domain/fun.domain';
 import { ConfigService } from '../../common/config.service';
 import { sleepMs } from '../../common/util';
 import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';
@@ -12,6 +13,8 @@ import { SleepService } from './sleep.service';
 import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort } from '../domain/ports/message-transport.port';
+import { resolverAccionBot } from '../domain/fun.domain';
+import { FunService } from '../infrastructure/fun.service';
 import { getUrlContext } from '../infrastructure/url-enricher';
 import { normalizeResponseContent } from '../../ai/infrastructure/mappers/response-normalize';
 
@@ -19,6 +22,10 @@ import { normalizeResponseContent } from '../../ai/infrastructure/mappers/respon
 export const ABORTED = Symbol('aborted');
 
 const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
+
+// Freno duro de las acciones físicas que el LLM inicia: el prompt ya pide
+// moderación, esto garantiza "rara vez" aunque el modelo haga caso omiso.
+const ACCION_BOT_COOLDOWN_MS = 45 * 60_000;
 
 @Injectable()
 export class SmartResponseService {
@@ -35,8 +42,11 @@ export class SmartResponseService {
     private readonly stealthDm: StealthDmService,
     private readonly sleep: SleepService,
     private readonly music: MusicService,
+    private readonly fun: FunService,
     private readonly events: EventEmitter2,
   ) {}
+
+  private ultimaAccionBot = 0;
 
   async process(message: IncomingMessage, signal: AbortSignal): Promise<void> {
     const channelId = message.channelId;
@@ -104,6 +114,7 @@ export class SmartResponseService {
       isDm,
       currentPlaying,
       urlContext,
+      accionesList: Object.keys(ACCIONES).join(', '),
     });
     this.logger.debug(`Análisis para ${userName}: ${JSON.stringify(analysis)}`);
     // Llegaron mensajes/typing nuevos mientras la IA pensaba: no enviar respuesta obsoleta.
@@ -170,9 +181,25 @@ export class SmartResponseService {
     if (allDms.length) this.stealthDm.scheduleDelayedDms(message.guildId, allDms);
 
     const botName = this.config.get<string>('bot_name', 'Hakkurin');
-    channelCtx.addMessage(botName, this.transport.getBotUserId() ?? '', fullResponseText.trim());
+    const botUserId = this.transport.getBotUserId() ?? '';
+    channelCtx.addMessage(botName, botUserId, fullResponseText.trim());
     channelCtx.updateBotActivity();
     this.state.setLastActiveChannel(channelId);
+
+    // El LLM quiere hacerle una acción física a alguien: validar target real y
+    // respetar el cooldown antes de publicar el gif.
+    const botAccion = resolverAccionBot(analysis.accion, activeUserIds, this.transport.getBotUserId());
+    if (botAccion && Date.now() - this.ultimaAccionBot > ACCION_BOT_COOLDOWN_MS) {
+      this.ultimaAccionBot = Date.now();
+      const accionEmbed = await this.fun.accionParaCanal(botAccion.tipo, botName, botAccion.target);
+      if (accionEmbed && (await this.transport.sendEmbed(channelId, accionEmbed))) {
+        channelCtx.addMessage(botName, botUserId, accionEmbed.description);
+        await this.memory.addInteraction(
+          BOT_SELF_ID,
+          `[SISTEMA] Hice una acción física (${botAccion.tipo})${botAccion.target ? ` con <@${botAccion.target}>` : ' al aire'}.`,
+        );
+      }
+    }
 
     const shouldSummarizeSelf = await this.memory.logSelfAction(
       userText,

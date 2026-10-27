@@ -42,6 +42,7 @@ function chatInteraction(over: Record<string, any> = {}) {
   const i: any = {
     isChatInputCommand: () => true,
     isMessageComponent: () => false,
+    isAutocomplete: () => false,
     commandName: 'play',
     user: { id: 'u1' },
     options: { getString: vi.fn(() => 'https://youtu.be/x') },
@@ -122,6 +123,7 @@ describe('SlashCommandsService — registro y ruteo', () => {
     const btn = {
       isChatInputCommand: () => false,
       isMessageComponent: () => true,
+      isAutocomplete: () => false,
       customId: 'song_0',
       message: { id: 'desconocido' },
       reply: vi.fn(async () => {}),
@@ -129,6 +131,21 @@ describe('SlashCommandsService — registro y ruteo', () => {
     } as any;
     await svc.handle(btn);
     expect(btn.reply).toHaveBeenCalledWith({ content: expect.stringContaining('expiró'), ephemeral: true });
+  });
+
+  it('autocomplete de /accion: responde opciones filtradas sin registrar en stats', async () => {
+    const { svc, stats } = makeFakes();
+    const ac: any = {
+      isChatInputCommand: () => false,
+      isMessageComponent: () => false,
+      isAutocomplete: () => true,
+      commandName: 'accion',
+      options: { getFocused: () => 'mor' },
+      respond: vi.fn(async () => {}),
+    };
+    await svc.handle(ac);
+    expect(ac.respond).toHaveBeenCalledWith([{ name: 'morder', value: 'morder' }]);
+    expect(stats.bumpCommand).not.toHaveBeenCalled();
   });
 });
 
@@ -201,6 +218,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     const btn = {
       isChatInputCommand: () => false,
       isMessageComponent: () => true,
+      isAutocomplete: () => false,
       customId: 'song_0',
       message: { id: 'msg-1' },
       guildId: 'g1',
@@ -234,7 +252,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     await vi.waitFor(() => expect(search.editReply).toHaveBeenCalled());
 
     const albumBtn = {
-      isChatInputCommand: () => false, isMessageComponent: () => true, customId: 'album_0',
+      isChatInputCommand: () => false, isMessageComponent: () => true, isAutocomplete: () => false, customId: 'album_0',
       message: { id: 'msg-1' }, guildId: 'g1', guild: { id: 'g1' }, member: { id: 'u1' }, channel: { id: 'c1' },
       deferUpdate: vi.fn(async () => {}), editReply: vi.fn(async () => {}),
     } as any;
@@ -246,7 +264,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
 
     // Mismo snapshot, ahora el botón de artista con isRadio.
     const artistBtn = {
-      isChatInputCommand: () => false, isMessageComponent: () => true, customId: 'artist_0',
+      isChatInputCommand: () => false, isMessageComponent: () => true, isAutocomplete: () => false, customId: 'artist_0',
       message: { id: 'msg-1' }, guildId: 'g1', guild: { id: 'g1' }, member: { id: 'u1' }, channel: { id: 'c1' },
       deferUpdate: vi.fn(async () => {}), editReply: vi.fn(async () => {}),
     } as any;
@@ -270,7 +288,7 @@ describe('SlashCommandsService — vista de búsqueda', () => {
     (musicUi as any).handleSearch(search, 'metal', false);
     await vi.waitFor(() => expect(search.editReply).toHaveBeenCalled());
     const btn = {
-      isChatInputCommand: () => false, isMessageComponent: () => true, customId: 'song_0',
+      isChatInputCommand: () => false, isMessageComponent: () => true, isAutocomplete: () => false, customId: 'song_0',
       message: { id: 'msg-1' }, guildId: 'g1', guild: { id: 'g1' }, member: { id: 'u1' }, channel: { id: 'c1' },
       deferUpdate: vi.fn(async () => {}), editReply: vi.fn(async () => {}),
     } as any;

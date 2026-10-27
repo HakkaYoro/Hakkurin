@@ -10,6 +10,7 @@ import { BotLifecycle } from '../application/ports/bot-lifecycle.port';
 import type { MemberInfo } from '../application/ports/bot-lifecycle.port';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
 import {
+  PROMPT_ACCION,
   PROMPT_HAKKA,
   PROMPT_HOLIDAY,
   PROMPT_REMINDER,
@@ -76,6 +77,7 @@ export class WebController {
       prompt_user_profile: c.prompt_user_profile || PROMPT_USER_PROFILE,
       prompt_translate: c.prompt_translate || PROMPT_TRANSLATE,
       prompt_reminder: c.prompt_reminder || PROMPT_REMINDER,
+      prompt_accion: c.prompt_accion || PROMPT_ACCION,
       has_bot_token: !!c.bot_token,
       has_navidrome_password: !!c.navidrome_password,
       has_openrouter_key: !!c.openrouter_api_key,
@@ -157,7 +159,7 @@ export class WebController {
       'deafen_move_channel_id',
       // Prompts: vacío = mantener el actual (el default vive en código).
       'prompt_hakka', 'prompt_rules', 'prompt_holiday', 'prompt_self_summary',
-      'prompt_user_profile', 'prompt_translate', 'prompt_reminder',
+      'prompt_user_profile', 'prompt_translate', 'prompt_reminder', 'prompt_accion',
       'bot_token', 'navidrome_password', 'webui_token', // write-only secrets
     ]) {
       if (typeof body[key] === 'string' && body[key].trim()) await this.config.set(key, body[key].trim());

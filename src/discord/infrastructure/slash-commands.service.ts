@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Client } from 'discord.js';
 import {
   SlashCommandBuilder,
+  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
   type MessageComponentInteraction,
 } from 'discord.js';
 import { MusicService } from '../../music/application/music.service';
 import { MusicUiService } from './music-ui.service';
 import { FunService } from './fun.service';
+import { filtrarAcciones } from '../domain/fun.domain';
 import { StatsService } from '../../stats/stats.service';
 
 @Injectable()
@@ -45,15 +47,7 @@ export class SlashCommandsService {
           { name: 'kitsune', value: 'kitsune' },
         )),
       new SlashCommandBuilder().setName('accion').setDescription('Acción con gif de anime hacia alguien (o al aire)')
-        .addStringOption((o) => o.setName('tipo').setDescription('Qué hacer').setRequired(true).addChoices(
-          { name: 'abrazar', value: 'abrazar' },
-          { name: 'acariciar', value: 'acariciar' },
-          { name: 'bofetada', value: 'bofetada' },
-          { name: 'besar', value: 'besar' },
-          { name: 'morder', value: 'morder' },
-          { name: 'bonk', value: 'bonk' },
-          { name: 'achuchar', value: 'achuchar' },
-        ))
+        .addStringOption((o) => o.setName('tipo').setDescription('Qué hacer (escribe para buscar)').setRequired(true).setAutocomplete(true))
         .addUserOption((o) => o.setName('usuario').setDescription('Objetivo de la acción (opcional)')),
       new SlashCommandBuilder().setName('ship').setDescription('Compatibilidad entre dos usuarios')
         .addUserOption((o) => o.setName('primero').setDescription('Primer usuario').setRequired(true))
@@ -69,13 +63,25 @@ export class SlashCommandsService {
     }
   }
 
-  async handle(interaction: ChatInputCommandInteraction | MessageComponentInteraction): Promise<void> {
+  async handle(
+    interaction: ChatInputCommandInteraction | MessageComponentInteraction | AutocompleteInteraction,
+  ): Promise<void> {
     try {
+      if (interaction.isAutocomplete()) return this.handleAutocomplete(interaction);
       if (interaction.isChatInputCommand()) return this.handleCommand(interaction);
       if (interaction.isMessageComponent()) return this.musicUi.handleButton(interaction as MessageComponentInteraction);
     } catch (e) {
       this.logger.error(`Error en interacción: ${(e as Error).message}`);
     }
+  }
+
+  // Autocomplete de /accion: sugerencias filtradas, sin registrar en stats.
+  private handleAutocomplete(i: AutocompleteInteraction): void {
+    const opciones =
+      i.commandName !== 'accion'
+        ? []
+        : filtrarAcciones(i.options.getFocused()).map((k) => ({ name: k, value: k }));
+    i.respond(opciones).catch((e) => this.logger.error(`autocomplete: ${(e as Error).message}`));
   }
 
   private async handleCommand(i: ChatInputCommandInteraction): Promise<void> {

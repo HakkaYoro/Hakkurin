@@ -274,6 +274,7 @@ const PROMPT_FIELDS: Array<{ key: keyof ConfigDraft; label: string; hint: string
   { key: 'prompt_holiday', label: 'Felicitaciones de feriados', hint: 'Variables: {{holiday}}, {{perfil}}', rows: 8 },
   { key: 'prompt_translate', label: 'Traducción (reacción 🌐)', hint: 'Variables: {{texto}}', rows: 4 },
   { key: 'prompt_reminder', label: 'Recordatorios', hint: 'Variables: {{accion}}, {{ping}}, {{nombre}}', rows: 4 },
+  { key: 'prompt_accion', label: 'Reacción a acciones (/accion contra Hakkurin)', hint: 'Variables: {{accion}}, {{nombre}}, {{perfil}}', rows: 5 },
 ];
 
 function PromptsSection({ form, set }: SectionProps) {

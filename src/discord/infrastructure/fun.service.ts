@@ -1,13 +1,25 @@
 // Comandos for-fun (anime/otaku): Jikan para fichas, nekos.best para gifs e
 // imágenes (gratis, sin key). Embeds al estilo de music-ui: título con emoji,
 // color por familia, footer del bot, thumbnail/imagen cuando aporta.
-import { Injectable, Logger } from '@nestjs/common';
+import { mkdir } from 'fs/promises';
+import { readFileSync } from 'fs';
+import * as path from 'path';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EmbedBuilder, type ChatInputCommandInteraction, type User } from 'discord.js';
 import { ConfigService } from '../../common/config.service';
+import { atomicWrite, delay } from '../../common/util';
+import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
+import { PROMPT_ACCION, fill } from '../../ai/application/ai-prompts';
+import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';
 import {
   ACCIONES,
+  accionEmbedData,
+  type AccionEmbedData,
+  type CachedNekos,
+  mezclarPool,
   nekosCredit,
-  nekosPick,
+  nekosLista,
+  purgarExpiradas,
   shipPercent,
   shipTags,
   uwuify,
@@ -22,7 +34,12 @@ const COLOR_INFO = 0x9b59b6;
 const COLOR_WAIFU = 0xff69b4;
 const COLOR_SHIP = 0xe91e63;
 
-//ponytail: fetch sin cache ni retry; Jikan rate-limit 60/min sobra para un bot casero. Upgrade: cache TTL si esto crece.
+const NEKOS_CACHE_FILE = 'data/nekos-cache.json';
+// Cooldown de la reacción LLM al /accion dirigido a Hakkurin: frena spam manual
+// del comando (cada reacción es una llamada al modelo).
+const REACCION_COOLDOWN_MS = 60_000;
+
+//ponytail: fetch de Jikan sin cache ni retry; rate-limit 60/min sobra para un bot casero.
 async function jikanGet(path: string, ua: string): Promise<any | null> {
   try {
     const res = await fetch(`https://api.jikan.moe/v4${path}`, {
@@ -40,7 +57,7 @@ async function jikanGet(path: string, ua: string): Promise<any | null> {
   }
 }
 
-async function nekosGet(cat: string, ua: string): Promise<NekosHit | null> {
+async function nekosGet(cat: string, ua: string): Promise<NekosHit[]> {
   try {
     const res = await fetch(`https://nekos.best/api/v2/${cat}?amount=8`, {
       headers: { 'User-Agent': ua },
@@ -48,20 +65,27 @@ async function nekosGet(cat: string, ua: string): Promise<NekosHit | null> {
     });
     if (!res.ok) {
       logger.warn(`nekos "${cat}": HTTP ${res.status}`);
-      return null;
+      return [];
     }
-    const hit = nekosPick(await res.json());
-    if (!hit) logger.warn(`nekos "${cat}": respuesta sin resultados`);
-    return hit;
+    const lista = nekosLista(await res.json());
+    if (!lista.length) logger.warn(`nekos "${cat}": respuesta sin resultados`);
+    return lista;
   } catch (e) {
     logger.warn(`nekos "${cat}": ${(e as Error).message}`);
-    return null;
+    return [];
   }
 }
 
 @Injectable()
 export class FunService {
-  constructor(private readonly config: ConfigService) {}
+  private nekosPool: Record<string, CachedNekos[]> | null = null;
+  private ultimaReaccion = 0;
+
+  constructor(
+    private readonly config: ConfigService,
+    @Inject(AiBrain) private readonly brain: AiBrain,
+    private readonly memory: MemoryService,
+  ) {}
 
   // nekos.best bloquea UAs genéricos/placeholder ("Discord bot"); exige APP_NAME (CONTACTO) real.
   private get ua(): string {
@@ -74,6 +98,38 @@ export class FunService {
 
   private errorEmbed(msg: string): EmbedBuilder {
     return this.footer(new EmbedBuilder().setTitle('😖').setDescription(msg).setColor(COLOR_INFO));
+  }
+
+  private pool(): Record<string, CachedNekos[]> {
+    if (!this.nekosPool) {
+      try {
+        const parsed = JSON.parse(readFileSync(NEKOS_CACHE_FILE, 'utf8'));
+        this.nekosPool = parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        this.nekosPool = {};
+      }
+    }
+    return this.nekosPool!;
+  }
+
+  /** Gif/imagen de una categoría: del pool vivo (TTL 3 días) o fetch fresco.
+   *  ponytail: sin lock — dos comandos simultáneos pueden fetchear doble; el
+   *  merge dedupea y no rompe nada. Upgrade: cola si algún día molesta. */
+  private async nekosCached(cat: string): Promise<NekosHit | null> {
+    const pool = this.pool();
+    const ahora = Date.now();
+    const vivos = purgarExpiradas(pool[cat] ?? [], ahora);
+    if (vivos.length) {
+      pool[cat] = vivos;
+      return vivos[Math.floor(Math.random() * vivos.length)];
+    }
+    const frescos = await nekosGet(cat, this.ua);
+    pool[cat] = mezclarPool(vivos, frescos, ahora);
+    if (!pool[cat].length) return null;
+    void mkdir(path.dirname(NEKOS_CACHE_FILE), { recursive: true })
+      .then(() => atomicWrite(NEKOS_CACHE_FILE, JSON.stringify(pool)))
+      .catch((e) => logger.warn(`cache: ${(e as Error).message}`));
+    return pool[cat][Math.floor(Math.random() * pool[cat].length)];
   }
 
   async handleAnime(i: ChatInputCommandInteraction, query: string): Promise<void> {
@@ -154,18 +210,16 @@ export class FunService {
       await i.editReply({ embeds: [this.errorEmbed('Esa categoría no existe, baka.')] }).catch(() => {});
       return;
     }
-    const hit = await nekosGet(category, this.ua);
+    const hit = await this.nekosCached(category);
     if (!hit) {
       await i.editReply({ embeds: [this.errorEmbed('nekos.best no respondió, inténtalo luego... quédate con tu imaginación por hoy.')] }).catch(() => {});
       return;
     }
     const e = this.footer(
-      new EmbedBuilder()
-        .setTitle('💌 Tu dosis diaria de 2D')
-        .setColor(COLOR_WAIFU)
-        .setDescription(nekosCredit(hit).trim())
-        .setImage(hit.url),
+      new EmbedBuilder().setTitle('💌 Tu dosis diaria de 2D').setColor(COLOR_WAIFU).setImage(hit.url),
     );
+    const credit = nekosCredit(hit).trim();
+    if (credit) e.setDescription(credit);
     await i.editReply({ embeds: [e] }).catch(() => {});
   }
 
@@ -176,14 +230,57 @@ export class FunService {
       await i.editReply({ embeds: [this.errorEmbed('No conozco esa acción, baka.')] }).catch(() => {});
       return;
     }
-    const hit = await nekosGet(accion.cat, this.ua);
     const autor = i.user.displayName ?? i.user.username;
-    const objetivo = targetId ? `<@${targetId}>` : null;
-    const frase = objetivo ? `**${autor}** ${accion.con} ${objetivo}` : `**${autor}** ${accion.solo}`;
-    const e = this.footer(new EmbedBuilder().setDescription(frase + (hit ? nekosCredit(hit) : '')).setColor(COLOR_WAIFU));
-    if (hit) e.setImage(hit.url);
-    if (targetId) e.setThumbnail(i.user.displayAvatarURL());
+    const hit = await this.nekosCached(accion.cat);
+    const data = accionEmbedData(autor, i.user.displayAvatarURL(), tipo, targetId, hit)!;
+    const e = this.footer(new EmbedBuilder().setDescription(data.description).setColor(COLOR_WAIFU));
+    if (data.image) e.setImage(data.image);
+    if (data.thumbnail) e.setThumbnail(data.thumbnail);
     await i.editReply({ embeds: [e] }).catch(() => {});
+    if (targetId && targetId === i.client?.user?.id) {
+      await this.reaccionar(i, tipo, autor, i.user.id);
+    }
+  }
+
+  /** Hakkurin reacciona en persona cuando le hacen una acción: respuesta
+   *  conversacional del LLM tras el embed. Nada de esto rompe el comando. */
+  private async reaccionar(
+    i: ChatInputCommandInteraction,
+    tipo: string,
+    autor: string,
+    autorId: string,
+  ): Promise<void> {
+    if (Date.now() - this.ultimaReaccion < REACCION_COOLDOWN_MS) return;
+    this.ultimaReaccion = Date.now();
+    try {
+      // ponytail: cooldown en memoria — un restart lo resetea; el freno real es
+      // que /accion es manual. Upgrade: persistir si algún día spamea cruzando restarts.
+      const accion = ACCIONES[tipo];
+      const perfil = ((await this.memory.getMemory(autorId)).summary || 'sin datos').slice(0, 600);
+      const prompt = fill(this.config.get('prompt_accion') || PROMPT_ACCION, {
+        accion: `${autor} ${accion.con ?? 'interactúa con'} Hakkurin (gif: ${accion.cat})`,
+        nombre: autor,
+        perfil,
+      });
+      const resp = (await this.brain.generateResponse(prompt, autorId, autor))?.trim();
+      if (!resp) return;
+      const ch: any = i.channel;
+      if (ch?.sendTyping) await ch.sendTyping().catch(() => {});
+      await delay(800 + Math.random() * 1500);
+      await i.followUp({ content: resp.slice(0, 1900) }).catch(() => {});
+      await this.memory.addInteraction(BOT_SELF_ID, `[SISTEMA] ${autor} usó /accion ${tipo} conmigo; respondí: ${resp}`);
+    } catch (e) {
+      logger.warn(`reacción a /accion: ${(e as Error).message}`);
+    }
+  }
+
+  /** Acción iniciada por el propio bot (campo accion del AnalysisResult):
+   *  devuelve los datos del embed para que smart-response los mande al canal. */
+  async accionParaCanal(tipo: string, autor: string, targetId: string | null): Promise<AccionEmbedData | null> {
+    const accion = ACCIONES[tipo];
+    if (!accion) return null;
+    const hit = await this.nekosCached(accion.cat);
+    return accionEmbedData(autor, null, tipo, targetId, hit);
   }
 
   async handleShip(i: ChatInputCommandInteraction, u1: User, u2: User): Promise<void> {
@@ -191,7 +288,7 @@ export class FunService {
     const auto = u1.id === u2.id;
     const pct = auto ? 100 : shipPercent(u1.id, u2.id);
     const { cat, veredicto } = shipTags(pct);
-    const hit = await nekosGet(cat, this.ua);
+    const hit = await this.nekosCached(cat);
     const hearts = Math.round(pct / 10);
     const bar = '❤️'.repeat(hearts) + '🖤'.repeat(10 - hearts);
     const nombre = (u: User) => u.displayName ?? u.username;

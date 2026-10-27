@@ -49,9 +49,11 @@ export function gmt4Date(d: Date): Date {
   return new Date(d.getTime() + -4 * 60 * 60_000);
 }
 
-/** Escritura atómica (tmp + rename): evita JSON truncado si el proceso muere a mitad. */
+/** Escritura atómica (tmp + rename): evita JSON truncado si el proceso muere a
+ *  mitad. El tmp lleva sufijo único: dos escrituras concurrentes del mismo
+ *  destino comparten directorio pero jamás el archivo temporal. */
 export async function atomicWrite(filePath: string, data: string | Uint8Array): Promise<void> {
-  const tmp = `${filePath}.tmp`;
+  const tmp = `${filePath}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
   await writeFile(tmp, data);
   await rename(tmp, filePath);
 }

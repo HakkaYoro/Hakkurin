@@ -10,6 +10,12 @@ export interface InteractionContext {
   isDm: boolean;
   currentPlaying?: string | null;
   urlContext?: string | null;
+  accionesList?: string | null; // claves válidas para el campo accion del JSON
+}
+
+export interface BotAccion {
+  tipo: string;
+  target: string | null;
 }
 
 export interface AnalysisResult {
@@ -20,6 +26,9 @@ export interface AnalysisResult {
   thought_process?: string;
   reply_to_message_id?: string | null;
   ping_users: string[];
+  // Aditivo y opcional: acción física con gif que el LLM quiere hacer; la
+  // valida smart-response (target real + cooldown) antes de ejecutarla.
+  accion?: BotAccion | null;
 }
 
 export abstract class AiBrain {

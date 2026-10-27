@@ -19,6 +19,11 @@ export abstract class MessageTransportPort {
   abstract isChannelSendable(channelId: string): boolean;
   abstract sendTyping(channelId: string): Promise<void>;
   abstract sendToChannel(channelId: string, content: string, opts?: SendOptions): Promise<boolean>;
+  /** Embed simple para salidas ricas del bot (acciones fun); false si falla. */
+  abstract sendEmbed(
+    channelId: string,
+    embed: { description: string; image?: string | null; thumbnail?: string | null },
+  ): Promise<boolean>;
   /** DM directo: miembro del guild indicado si hay, si no usuario global. */
   abstract sendDm(userId: string, content: string, guildId?: string | null): Promise<boolean>;
   /** Descarga binaria para contexto multimodal; null si falla. */

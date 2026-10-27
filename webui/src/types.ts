@@ -46,6 +46,7 @@ export interface AppConfig {
   prompt_user_profile: string;
   prompt_translate: string;
   prompt_reminder: string;
+  prompt_accion: string;
   has_bot_token: boolean;
   has_navidrome_password: boolean;
   has_openrouter_key: boolean;

@@ -3,6 +3,7 @@ import { DiscordAPIError } from 'discord.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DiscordAdapter } from '../src/discord/infrastructure/discord.adapter';
 import { SmartResponseService } from '../src/discord/application/smart-response.service';
+import { FunService } from '../src/discord/infrastructure/fun.service';
 import { ReminderService } from '../src/discord/application/reminder.service';
 import { HolidayService } from '../src/discord/application/holiday.service';
 import { ConversationService } from '../src/conversation/application/conversation.service';
@@ -88,6 +89,9 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
     async sendToChannel(id: string, content: string, opts?: SendOptions) {
       return ref.svc!.sendToChannel(id, content, opts);
     }
+    async sendEmbed(id: string, embed: { description: string; image?: string | null; thumbnail?: string | null }) {
+      return ref.svc!.sendEmbed(id, embed);
+    }
     async sendDm(userId: string, content: string, guildId?: string | null) {
       return ref.svc!.sendDm(userId, content, guildId);
     }
@@ -120,12 +124,13 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
 
   const stealthDm = new StealthDmService(transport);
   const sleep = new SleepService(new SleepStoreAdapter(), transport);
+  const fun = new FunService(config, brain, memory);
   // Mismo cableado que MemoryModule en producción: el listener encola la
   // respuesta del bot al recibir InteractionAnswered.
   new MemoryEventsListener(events, memory, config).listen(events);
   const smartResponse = new SmartResponseService(
     config, conversation, brain, memory,
-    transport, state, stealthDm, sleep, music, events,
+    transport, state, stealthDm, sleep, music, fun, events,
   );
   const reminders = new ReminderService(memory, brain, parser, config, transport);
   const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());

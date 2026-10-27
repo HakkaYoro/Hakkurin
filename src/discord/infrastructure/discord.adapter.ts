@@ -5,6 +5,7 @@ import {
   Client,
   DiscordAPIError,
   DMChannel,
+  EmbedBuilder,
   Events,
   GatewayIntentBits,
   Partials,
@@ -415,6 +416,24 @@ export class DiscordAdapter implements OnModuleInit, OnModuleDestroy, MessageTra
       } else {
         this.logger.warn(`Error enviando a ${channelId}: ${(e as Error).message}`);
       }
+      return false;
+    }
+  }
+
+  async sendEmbed(
+    channelId: string,
+    embed: { description: string; image?: string | null; thumbnail?: string | null },
+  ): Promise<boolean> {
+    const channel = this.resolveTextChannel(channelId);
+    if (!channel) return false;
+    const e = new EmbedBuilder().setDescription(embed.description);
+    if (embed.image) e.setImage(embed.image);
+    if (embed.thumbnail) e.setThumbnail(embed.thumbnail);
+    try {
+      await channel.send({ embeds: [e] });
+      return true;
+    } catch (err) {
+      this.logger.warn(`Error enviando embed a ${channelId}: ${(err as Error).message}`);
       return false;
     }
   }

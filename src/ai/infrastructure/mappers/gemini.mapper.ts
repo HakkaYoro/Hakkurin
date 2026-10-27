@@ -17,6 +17,11 @@ const toBool = (v: unknown): unknown => {
   return v;
 };
 
+const AccionSchema = z.object({
+  tipo: z.preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : ''), z.string().catch('')),
+  target: z.preprocess((v) => (typeof v === 'string' && v.trim() ? v.trim() : null), z.string().nullable().catch(null)),
+});
+
 const AnalysisResultSchema = z.object({
   intent: z.enum(INTENTS).catch('ignore'),
   response_content: z.preprocess(toStringList, z.array(z.string())),
@@ -27,6 +32,11 @@ const AnalysisResultSchema = z.object({
   ),
   ping_users: z.preprocess(toStringList, z.array(z.string())),
   thought_process: z.preprocess((v) => (v == null ? undefined : String(v)), z.string().optional()),
+  // Campo nuevo y opcional: modelos viejos no lo mandan → null.
+  accion: z.preprocess(
+    (v) => (v && typeof v === 'object' ? v : null),
+    AccionSchema.nullable().catch(null),
+  ),
 });
 
 export function errorAnalysisResult(message: string): AnalysisResult {
