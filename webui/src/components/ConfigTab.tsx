@@ -13,7 +13,7 @@ const SECTIONS = [
 ] as const;
 
 type Section = (typeof SECTIONS)[number][0];
-type Secret = 'gemini_keys' | 'openrouter_api_key' | 'bot_token' | 'navidrome_password' | 'webui_token' | 'klipy_api_key';
+type Secret = 'gemini_keys' | 'openrouter_api_key' | 'bot_token' | 'navidrome_password' | 'webui_token';
 
 interface SectionProps {
   form: ConfigDraft;
@@ -32,7 +32,7 @@ export default function ConfigTab() {
       .config()
       .then((c) => {
         document.title = c.bot_name || 'Hakkurin';
-        setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '', klipy_api_key: '' });
+        setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '' });
       })
       .catch(() => notify('No pude cargar la configuración', false));
   }, [notify]);
@@ -49,7 +49,7 @@ export default function ConfigTab() {
     try {
       await api.saveConfig(form);
       const c = await api.config();
-      setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '', klipy_api_key: '' });
+      setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '' });
       notify('Configuración guardada');
     } catch {
       notify('Error al guardar', false);
@@ -226,22 +226,6 @@ function IaSection({ form, set, setSecret }: SectionProps) {
           </div>
         </>
       )}
-
-      <div className="form-group">
-        <label htmlFor="f-klipy">
-          KLIPY API Key (comandos fun){' '}
-          {form.has_klipy_key && <span className="badge">configurada</span>}
-        </label>
-        <input
-          id="f-klipy"
-          type="password"
-          placeholder="(dejar vacío para mantener la actual)"
-          value={form.klipy_api_key}
-          onChange={setSecret('klipy_api_key')}
-          autoComplete="new-password"
-        />
-        <p className="hint">partner.klipy.com → API Keys (gratis). Sin key, /ship /waifu y /accion salen sin gif.</p>
-      </div>
 
       <div className="form-row">
         <div className="form-group">

@@ -79,7 +79,6 @@ export class WebController {
       has_navidrome_password: !!c.navidrome_password,
       has_openrouter_key: !!c.openrouter_api_key,
       has_webui_token: !!c.webui_token,
-      has_klipy_key: !!c.klipy_api_key,
       gemini_keys_count: (c.gemini_keys ?? []).length,
     };
   }
@@ -158,7 +157,7 @@ export class WebController {
       // Prompts: vacío = mantener el actual (el default vive en código).
       'prompt_hakka', 'prompt_rules', 'prompt_holiday', 'prompt_self_summary',
       'prompt_user_profile', 'prompt_translate', 'prompt_reminder',
-      'bot_token', 'navidrome_password', 'webui_token', 'klipy_api_key', // write-only secrets
+      'bot_token', 'navidrome_password', 'webui_token', // write-only secrets
     ]) {
       if (typeof body[key] === 'string' && body[key].trim()) await this.config.set(key, body[key].trim());
     }

@@ -42,9 +42,7 @@ export class SlashCommandsService {
           { name: 'waifu', value: 'waifu' },
           { name: 'husbando', value: 'husbando' },
           { name: 'neko', value: 'neko' },
-          { name: 'shinobu', value: 'shinobu' },
-          { name: 'megumin', value: 'megumin' },
-          { name: 'awoo', value: 'awoo' },
+          { name: 'kitsune', value: 'kitsune' },
         )),
       new SlashCommandBuilder().setName('accion').setDescription('Acción con gif de anime hacia alguien (o al aire)')
         .addStringOption((o) => o.setName('tipo').setDescription('Qué hacer').setRequired(true).addChoices(

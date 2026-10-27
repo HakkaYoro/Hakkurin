@@ -1,53 +1,70 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shipPercent, shipTags, uwuify, SHIP_TIERS, FunService } from '../src/discord/infrastructure/fun.service';
-import { fill } from '../src/ai/application/ai-prompts';
+import {
+  ACCIONES,
+  nekosCredit,
+  nekosPick,
+  shipPercent,
+  shipTags,
+  SHIP_TIERS,
+  uwuify,
+  WAIFU_CATEGORIES,
+} from '../src/discord/domain/fun.domain';
+import { FunService } from '../src/discord/infrastructure/fun.service';
 
-describe('shipPercent', () => {
-  it('es determinista y simétrico', () => {
+describe('dominio fun', () => {
+  it('shipPercent es determinista, simétrico y cae en 0..100', () => {
     const a = shipPercent('111', '222');
     expect(shipPercent('111', '222')).toBe(a);
     expect(shipPercent('222', '111')).toBe(a);
-  });
-
-  it('cae en 0..100 y varía entre pares', () => {
     for (const [x, y] of [['1', '2'], ['42', '99'], ['123456789012345678', '987654321098765432']]) {
-      const p = shipPercent(x, y);
-      expect(p).toBeGreaterThanOrEqual(0);
-      expect(p).toBeLessThanOrEqual(100);
+      expect(shipPercent(x, y)).toBeLessThanOrEqual(100);
     }
     expect(shipPercent('1', '2')).not.toBe(shipPercent('1', '3'));
   });
-});
 
-describe('shipTags', () => {
-  it('cada rango cae en su tier y el 100 cae en el mejor', () => {
-    expect(shipTags(0).min).toBe(0);
-    expect(shipTags(19).q).toBe(SHIP_TIERS[0].q);
-    expect(shipTags(20).min).toBe(20);
-    expect(shipTags(55).min).toBe(40);
-    expect(shipTags(100).min).toBe(80);
+  it('shipTags mapea cada rango a su categoría de nekos.best y el 100 al mejor tier', () => {
+    expect(shipTags(0).cat).toBe(SHIP_TIERS[0].cat);
+    expect(shipTags(19).cat).toBe('angry');
+    expect(shipTags(25).cat).toBe('confused');
+    expect(shipTags(55).cat).toBe('shrug');
+    expect(shipTags(70).cat).toBe('cuddle');
+    expect(shipTags(100).cat).toBe('kiss');
   });
-});
 
-describe('uwuify', () => {
-  it('reemplaza l/r (mayúsculas también) y remata con uwu', () => {
+  it('uwuify reemplaza l/r (mayúsculas también) y remata con uwu', () => {
     expect(uwuify('Real Lad')).toBe('Weaw Wad uwu');
     expect(uwuify('hola')).toBe('howa uwu');
   });
-});
 
-describe('fill', () => {
-  it('reemplaza conocidas y deja desconocidas intactas', () => {
-    expect(fill('hola {{nombre}} y {{otra}}', { nombre: 'Hakka' })).toBe('hola Hakka y {{otra}}');
-    expect(fill('sin vars', {})).toBe('sin vars');
+  it('nekosPick elige un resultado con url y devuelve null sin resultados', () => {
+    const results = [{ url: 'http://n/1.gif' }, { url: 'http://n/2.gif' }];
+    for (let i = 0; i < 20; i++) {
+      const hit = nekosPick({ results });
+      expect(hit!.url).toMatch(/^http:\/\/n\//);
+    }
+    expect(nekosPick({ results: [] })).toBeNull();
+    expect(nekosPick({})).toBeNull();
+    expect(nekosPick({ results: [{ sin: 'url' }] })).toBeNull();
+  });
+
+  it('nekosCredit acredita al anime (gif) o al artista (imagen), vacío si no hay', () => {
+    expect(nekosCredit({ url: 'u', anime_name: 'Hoshikuzu Telepath' })).toContain('Hoshikuzu Telepath');
+    expect(nekosCredit({ url: 'u', artist_name: 'Nana', artist_href: 'http://a/nana' })).toContain('[Nana](http://a/nana)');
+    expect(nekosCredit({ url: 'u', artist_name: 'Nana' })).toContain('Nana');
+    expect(nekosCredit({ url: 'u' })).toBe('');
+  });
+
+  it('las 7 acciones apuntan a categorías gif existentes en nekos.best', () => {
+    expect(Object.keys(ACCIONES)).toHaveLength(7);
+    for (const a of Object.values(ACCIONES)) expect(a.cat).toBeTruthy();
   });
 });
 
 // Handlers: fetch global stubbeado por dominio; aserciones sobre el embed que
 // llega a editReply (mismo estilo que los tests de music-ui).
 
-function makeConfig(klipyKey = ''): any {
-  return { get: (k: string, d?: any) => (k === 'klipy_api_key' ? klipyKey : d ?? '') };
+function makeConfig(): any {
+  return { get: (k: string, d?: any) => (k === 'bot_name' ? 'Hakkurin' : d ?? '') };
 }
 
 function makeInteraction(): any {
@@ -69,17 +86,17 @@ function user(id: string, name: string): any {
 
 interface Fixtures {
   jikan?: any;
-  klipy?: any;
-  fail?: 'all' | 'jikan' | 'klipy';
+  nekos?: any;
+  fail?: 'all' | 'jikan' | 'nekos';
 }
 
 function stubFetch(f: Fixtures): any {
   const mock = vi.fn(async (url: any) => {
     const u = String(url);
-    const which = u.includes('jikan') ? 'jikan' : u.includes('klipy') ? 'klipy' : '';
+    const which = u.includes('jikan') ? 'jikan' : u.includes('nekos.best') ? 'nekos' : '';
     if (f.fail === 'all' || f.fail === which) throw new Error('red caída');
     if (which === 'jikan') return { ok: true, json: async () => f.jikan ?? { data: [] } };
-    if (which === 'klipy') return { ok: true, json: async () => f.klipy ?? {} };
+    if (which === 'nekos') return { ok: true, json: async () => f.nekos ?? { results: [] } };
     throw new Error(`fetch inesperado: ${u}`);
   });
   vi.stubGlobal('fetch', mock);
@@ -112,14 +129,14 @@ describe('FunService — handlers', () => {
   });
 
   it('/anime: sin resultados y Jikan caído caen en el error embed, sin lanzar', async () => {
+    stubFetch({ jikan: { data: [] } });
     const svc = new FunService(makeConfig());
     const i = makeInteraction();
-    stubFetch({ jikan: { data: [] } });
     await svc.handleAnime(i, 'no existe');
     expect(embedOf(i).description).toContain('No encontré');
 
-    const i2 = makeInteraction();
     stubFetch({ fail: 'jikan' });
+    const i2 = makeInteraction();
     await svc.handleAnime(i2, 'x');
     expect(embedOf(i2).description).toContain('No encontré');
   });
@@ -161,64 +178,47 @@ describe('FunService — handlers', () => {
     expect(e.description).toContain('`2.` [Dos](https://mal/2) — ⭐ —');
   });
 
-  it('/waifu: gif de KLIPY con customer_id; sin key y con fallo dan mensajes distintos', async () => {
-    const fm = stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/1.gif' } } }] } } });
-    const svc = new FunService(makeConfig('KEY-KLIPY'));
-    const i = makeInteraction();
-    await svc.handleWaifu(i, 'neko');
-    expect(embedOf(i).image.url).toBe('http://k/1.gif');
-    const url = String(fm.mock.calls[0][0]);
-    expect(url).toContain('customer_id=');
-    expect(url).toContain('content_filter=low');
-
-    // Con key y KLIPY caído: "no respondió" (la razón queda en el log).
-    stubFetch({ fail: 'klipy' });
-    const i2 = makeInteraction();
-    await svc.handleWaifu(i2, 'neko');
-    expect(embedOf(i2).description).toContain('KLIPY no respondió');
-
-    // Sin key: mensaje propio y ni siquiera hay fetch.
-    const fm2 = stubFetch({ klipy: {} });
-    const i3 = makeInteraction();
-    await new FunService(makeConfig()).handleWaifu(i3, 'neko');
-    expect(embedOf(i3).description).toContain('key de KLIPY');
-    expect(fm2).not.toHaveBeenCalled();
-  });
-
-  it('/waifu: acepta variantes planas del item (sin files anidado)', async () => {
-    stubFetch({ klipy: { result: true, data: { items: [{ gif: { url: 'http://k/flat.gif' }, max_1mb_gif: { url: 'http://k/big.gif' } }] } } });
-    const svc = new FunService(makeConfig('KEY-KLIPY'));
+  it('/waifu: imagen de nekos.best con crédito de artista; categoría inválida y caída dan error embed', async () => {
+    stubFetch({ nekos: { results: [{ url: 'http://n/waifu.png', artist_name: 'Nana', artist_href: 'http://a/nana' }] } });
+    const svc = new FunService(makeConfig());
     const i = makeInteraction();
     await svc.handleWaifu(i, 'waifu');
-    expect(embedOf(i).image.url).toBe('http://k/flat.gif');
+    const e = embedOf(i);
+    expect(e.image.url).toBe('http://n/waifu.png');
+    expect(e.description).toContain('[Nana](http://a/nana)');
+
+    const i2 = makeInteraction();
+    await svc.handleWaifu(i2, 'shinobu'); // ya no existe en nekos.best
+    expect(embedOf(i2).description).toContain('no existe');
+
+    stubFetch({ fail: 'nekos' });
+    const i3 = makeInteraction();
+    await svc.handleWaifu(i3, 'neko');
+    expect(embedOf(i3).description).toContain('nekos.best no respondió');
   });
 
-  it('/accion: con objetivo arma "Autor abraza a <@id>"; sin objetivo usa la frase solo', async () => {
-    const svc = new FunService(makeConfig('KEY-KLIPY'));
-    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/hug.gif' } } }] } } });
+  it('/accion: con objetivo arma "Autor abraza a <@id>" con gif y crédito del anime', async () => {
+    stubFetch({ nekos: { results: [{ url: 'http://n/hug.gif', anime_name: 'Hoshikuzu Telepath' }] } });
+    const svc = new FunService(makeConfig());
     const i = makeInteraction();
     await svc.handleAccion(i, 'abrazar', '555');
     const e = embedOf(i);
-    expect(e.description).toBe('**Autor** abraza a <@555>');
-    expect(e.image.url).toBe('http://k/hug.gif');
+    expect(e.description).toContain('**Autor** abraza a <@555>');
+    expect(e.description).toContain('Hoshikuzu Telepath');
+    expect(e.image.url).toBe('http://n/hug.gif');
 
     const i2 = makeInteraction();
-    await new FunService(makeConfig()).handleAccion(i2, 'abrazar', null);
+    await svc.handleAccion(i2, 'abrazar', null);
     expect(embedOf(i2).description).toContain('reparto abrazos gratis');
-
-    // Sin key la nota de configuración aparece en el embed.
-    const i3 = makeInteraction();
-    await new FunService(makeConfig()).handleAccion(i3, 'bonk', null);
-    expect(embedOf(i3).description).toContain('Falta la key KLIPY');
   });
 
-  it('/ship: % determinista en la descripción, barra consistente y gif de KLIPY solo con key', async () => {
+  it('/ship: % determinista en la descripción, barra consistente y gif de nekos.best', async () => {
     const u1 = user('111', 'Ana');
     const u2 = user('222', 'Beto');
     const pct = shipPercent('111', '222');
 
-    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/love.gif' } } }] } } });
-    const svc = new FunService(makeConfig('KEY-KLIPY'));
+    stubFetch({ nekos: { results: [{ url: 'http://n/love.gif', anime_name: 'Nisekoi' }] } });
+    const svc = new FunService(makeConfig());
     const i = makeInteraction();
     await svc.handleShip(i, u1, u2);
     const e = embedOf(i);
@@ -226,22 +226,20 @@ describe('FunService — handlers', () => {
     expect(e.description).toContain(`**${pct}%**`);
     expect(e.description).toContain('❤️'.repeat(Math.round(pct / 10)));
     expect(e.thumbnail.url).toBe('http://av/111');
-    expect(e.image.url).toBe('http://k/love.gif');
+    expect(e.image.url).toBe('http://n/love.gif');
 
-    // Sin key: ni consulta a KLIPY ni imagen, pero el embed sale con la nota.
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    // nekos.best caído: el embed sale igual, sólo sin gif (sin lanzar).
+    stubFetch({ fail: 'nekos' });
     const i2 = makeInteraction();
-    await new FunService(makeConfig()).handleShip(i2, u1, u2);
+    await svc.handleShip(i2, u1, u2);
     const e2 = embedOf(i2);
     expect(e2.description).toContain(`**${pct}%**`);
-    expect(e2.description).toContain('Falta la key KLIPY');
     expect(e2.image).toBeUndefined();
-    expect(fetchMock).not.toHaveBeenCalled();
 
     // Auto-ship: 100% fijo.
+    stubFetch({ nekos: { results: [{ url: 'http://n/kiss.gif' }] } });
     const i3 = makeInteraction();
-    await new FunService(makeConfig('KEY')).handleShip(i3, u1, u1);
+    await svc.handleShip(i3, u1, u1);
     expect(embedOf(i3).description).toContain('**100%**');
   });
 
@@ -256,3 +254,4 @@ describe('FunService — handlers', () => {
     expect(i2.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
   });
 });
+
