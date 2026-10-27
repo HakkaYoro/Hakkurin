@@ -4,6 +4,8 @@ import { ConsoleLogger, Injectable } from '@nestjs/common';
 // desde el proceso) y la WebUI expone GET /logs para descargarlo.
 const MAX_LINES = 2000;
 
+const strCtx = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
 @Injectable()
 export class LogTeeService extends ConsoleLogger {
   private readonly buffer: string[] = [];
@@ -14,29 +16,31 @@ export class LogTeeService extends ConsoleLogger {
     if (this.buffer.length > MAX_LINES) this.buffer.shift();
   }
 
-  log(message: any, context?: string): void {
-    this.tee('LOG', message, context);
-    super.log(message, context);
+  // Forward con rest: super.log(msg, undefined) explícito hace que ConsoleLogger
+  // imprima [msg, undefined] como DOS mensajes (la línea "undefined" del stdout).
+  log(message: any, ...rest: any[]): void {
+    this.tee('LOG', message, strCtx(rest[0]));
+    super.log(message, ...rest);
   }
 
-  warn(message: any, context?: string): void {
-    this.tee('WARN', message, context);
-    super.warn(message, context);
+  warn(message: any, ...rest: any[]): void {
+    this.tee('WARN', message, strCtx(rest[0]));
+    super.warn(message, ...rest);
   }
 
-  error(message: any, stackOrContext?: string, context?: string): void {
-    this.tee('ERROR', message, context);
-    super.error(message, stackOrContext, context);
+  error(message: any, ...rest: any[]): void {
+    this.tee('ERROR', message, strCtx(rest[1]));
+    super.error(message, ...rest);
   }
 
-  debug(message: any, context?: string): void {
-    this.tee('DEBUG', message, context);
-    super.debug(message, context);
+  debug(message: any, ...rest: any[]): void {
+    this.tee('DEBUG', message, strCtx(rest[0]));
+    super.debug(message, ...rest);
   }
 
-  verbose(message: any, context?: string): void {
-    this.tee('VERB', message, context);
-    super.verbose(message, context);
+  verbose(message: any, ...rest: any[]): void {
+    this.tee('VERB', message, strCtx(rest[0]));
+    super.verbose(message, ...rest);
   }
 
   text(): string {

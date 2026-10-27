@@ -23,6 +23,15 @@ it('captura línea con timestamp, nivel y contexto', () => {
   expect(out).toContain('ERROR boom');
 });
 
+it('log a 1 argumento imprime UNA sola línea (regresión: reenviar undefined explícito duplicaba la línea)', () => {
+  const t = new LogTeeService();
+  t.log('hola');
+  const calls = vi.mocked(process.stdout.write).mock.calls;
+  expect(calls).toHaveLength(1);
+  expect(calls[0].join('')).not.toContain('undefined');
+  expect(t.text()).toContain('LOG hola');
+});
+
 it('ring buffer: conserva las últimas 2000 líneas', () => {
   const t = new LogTeeService();
   for (let i = 0; i < 2100; i++) t.log(`línea ${i}`);
