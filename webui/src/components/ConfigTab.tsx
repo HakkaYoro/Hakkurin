@@ -6,13 +6,14 @@ import type { ConfigDraft } from '../types';
 const SECTIONS = [
   ['general', 'General'],
   ['ia', 'IA'],
+  ['prompts', 'Prompts'],
   ['voz', 'Voz y música'],
   ['navidrome', 'Navidrome'],
   ['peligro', 'Peligro'],
 ] as const;
 
 type Section = (typeof SECTIONS)[number][0];
-type Secret = 'gemini_keys' | 'openrouter_api_key' | 'bot_token' | 'navidrome_password' | 'webui_token';
+type Secret = 'gemini_keys' | 'openrouter_api_key' | 'bot_token' | 'navidrome_password' | 'webui_token' | 'tenor_api_key';
 
 interface SectionProps {
   form: ConfigDraft;
@@ -31,7 +32,7 @@ export default function ConfigTab() {
       .config()
       .then((c) => {
         document.title = c.bot_name || 'Hakkurin';
-        setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '' });
+        setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '', tenor_api_key: '' });
       })
       .catch(() => notify('No pude cargar la configuración', false));
   }, [notify]);
@@ -48,7 +49,7 @@ export default function ConfigTab() {
     try {
       await api.saveConfig(form);
       const c = await api.config();
-      setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '' });
+      setForm({ ...c, gemini_keys: '', openrouter_api_key: '', bot_token: '', navidrome_password: '', webui_token: '', tenor_api_key: '' });
       notify('Configuración guardada');
     } catch {
       notify('Error al guardar', false);
@@ -77,6 +78,7 @@ export default function ConfigTab() {
 
       {section === 'general' && <GeneralSection {...props} />}
       {section === 'ia' && <IaSection {...props} />}
+      {section === 'prompts' && <PromptsSection {...props} />}
       {section === 'voz' && <VozSection {...props} />}
       {section === 'navidrome' && <NavidromeSection {...props} />}
       {section === 'peligro' && <PeligroSection {...props} restart={restart} />}
@@ -107,10 +109,6 @@ function GeneralSection({ form, set, setSecret }: SectionProps) {
       <div className="form-group">
         <label htmlFor="f-bot-name">Nombre del bot</label>
         <input id="f-bot-name" value={form.bot_name} onChange={(e) => set('bot_name', e.target.value)} />
-      </div>
-      <div className="form-group">
-        <label htmlFor="f-prompt">Prompt de sistema</label>
-        <textarea id="f-prompt" rows={5} value={form.system_prompt} onChange={(e) => set('system_prompt', e.target.value)} />
       </div>
       <div className="form-row">
         <div className="form-group">
@@ -229,6 +227,22 @@ function IaSection({ form, set, setSecret }: SectionProps) {
         </>
       )}
 
+      <div className="form-group">
+        <label htmlFor="f-tenor">
+          Tenor API Key (comandos fun){' '}
+          {form.has_tenor_key && <span className="badge">configurada</span>}
+        </label>
+        <input
+          id="f-tenor"
+          type="password"
+          placeholder="(dejar vacío para mantener la actual)"
+          value={form.tenor_api_key}
+          onChange={setSecret('tenor_api_key')}
+          autoComplete="new-password"
+        />
+        <p className="hint">Google Cloud → habilita &quot;Tenor API&quot; y crea una key. Sin key, /ship sale sin gif.</p>
+      </div>
+
       <div className="form-row">
         <div className="form-group">
           <label htmlFor="f-history">Máximo de mensajes de contexto</label>
@@ -254,6 +268,40 @@ function IaSection({ form, set, setSecret }: SectionProps) {
           />
         </div>
       </div>
+    </section>
+  );
+}
+
+const PROMPT_FIELDS: Array<{ key: keyof ConfigDraft; label: string; hint: string; rows: number }> = [
+  { key: 'system_prompt', label: 'Personalidad (prompt de sistema)', hint: 'Quién es Hakkurin. Va al inicio de cada interacción.', rows: 8 },
+  { key: 'prompt_hakka', label: 'Relación con Hakka', hint: 'Variables: {{developer_id}}', rows: 8 },
+  { key: 'prompt_rules', label: 'Reglas de personalidad y comportamiento', hint: 'El formato JSON de salida NO es editable.', rows: 14 },
+  { key: 'prompt_self_summary', label: 'Memoria interna (self)', hint: 'Variables: {{tiempo}}, {{memoria_previa}}, {{interacciones}}. El bloque SCHEDULED_ACTIONS debe conservar su formato JSON.', rows: 16 },
+  { key: 'prompt_user_profile', label: 'Memoria de usuarios', hint: 'Variables: {{user_id}}, {{resumen}}, {{interacciones}}, {{developer_id}}', rows: 10 },
+  { key: 'prompt_holiday', label: 'Felicitaciones de feriados', hint: 'Variables: {{holiday}}, {{perfil}}', rows: 8 },
+  { key: 'prompt_translate', label: 'Traducción (reacción 🌐)', hint: 'Variables: {{texto}}', rows: 4 },
+  { key: 'prompt_reminder', label: 'Recordatorios', hint: 'Variables: {{accion}}, {{ping}}, {{nombre}}', rows: 4 },
+];
+
+function PromptsSection({ form, set }: SectionProps) {
+  return (
+    <section className="card">
+      <h2>Prompts</h2>
+      <p className="hint">
+        Texto vacío = usar el default. Si editas, conserva las variables <code>{'{{asi}}'}</code> — lo que no se reemplace queda literal.
+      </p>
+      {PROMPT_FIELDS.map((f) => (
+        <div className="form-group" key={f.key}>
+          <label htmlFor={`f-${f.key}`}>{f.label}</label>
+          <textarea
+            id={`f-${f.key}`}
+            rows={f.rows}
+            value={form[f.key] as string}
+            onChange={(e) => set(f.key, e.target.value)}
+          />
+          <p className="hint">{f.hint}</p>
+        </div>
+      ))}
     </section>
   );
 }

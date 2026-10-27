@@ -1,6 +1,8 @@
 // El @Interval vive en DiscordAdapter: dedupe en memoria de esta instancia entre iteraciones del loop.
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
+import { PROMPT_REMINDER, fill } from '../../ai/application/ai-prompts';
+import { ConfigService } from '../../common/config.service';
 import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.service';
 import { ActionParserService, type ScheduledAction } from './action-parser.service';
 import { MessageTransportPort } from '../domain/ports/message-transport.port';
@@ -14,6 +16,7 @@ export class ReminderService {
     private readonly memory: MemoryService,
     @Inject(AiBrain) private readonly brain: AiBrain,
     private readonly parser: ActionParserService,
+    private readonly config: ConfigService,
     @Inject(forwardRef(() => MessageTransportPort))
     private readonly transport: MessageTransportPort,
   ) {}
@@ -68,11 +71,11 @@ export class ReminderService {
         userName = (await this.transport.fetchUsername(targetUserId)) ?? 'Usuario';
       }
 
-      const prompt =
-        `[SISTEMA]: EJECUCIÓN DE RECORDATORIO AUTOMÁTICO.\n` +
-        `ACCIÓN: ${actionDesc}\n` +
-        `INSTRUCCIÓN: Genera el mensaje para cumplir este compromiso ahora mismo.\n` +
-        `NOTA: Debes mencionar al usuario ${ping.trim()} si corresponde. Usa tu memoria con él para ser personal y natural.`;
+      const prompt = fill(this.config.get('prompt_reminder') || PROMPT_REMINDER, {
+        accion: actionDesc,
+        ping: ping.trim() || 'nadie',
+        nombre: userName,
+      });
       let response = await this.brain.generateResponse(prompt, ctxId, userName);
       if (typeof response !== 'string' || !response.trim()) {
         response = `${ping}recordatorio: ${actionDesc}`.trim();

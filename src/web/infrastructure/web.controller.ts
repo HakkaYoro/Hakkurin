@@ -9,6 +9,15 @@ import { BOT_SELF_ID, MemoryService } from '../../memory/application/memory.serv
 import { BotLifecycle } from '../application/ports/bot-lifecycle.port';
 import type { MemberInfo } from '../application/ports/bot-lifecycle.port';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
+import {
+  PROMPT_HAKKA,
+  PROMPT_HOLIDAY,
+  PROMPT_REMINDER,
+  PROMPT_RULES,
+  PROMPT_SELF_SUMMARY,
+  PROMPT_TRANSLATE,
+  PROMPT_USER_PROFILE,
+} from '../../ai/application/ai-prompts';
 import { StatsService } from '../../stats/stats.service';
 import { AuthGuard } from './auth.guard';
 import { LogTeeService } from './log-tee.service';
@@ -58,10 +67,19 @@ export class WebController {
       navidrome_external_url: c.navidrome_external_url ?? '',
       navidrome_username: c.navidrome_username ?? '',
       ytdl_sidecar_url: c.ytdl_sidecar_url ?? '',
+      // Prompts efectivos: el default vive en código, config sólo lo overridea.
+      prompt_hakka: c.prompt_hakka || PROMPT_HAKKA,
+      prompt_rules: c.prompt_rules || PROMPT_RULES,
+      prompt_holiday: c.prompt_holiday || PROMPT_HOLIDAY,
+      prompt_self_summary: c.prompt_self_summary || PROMPT_SELF_SUMMARY,
+      prompt_user_profile: c.prompt_user_profile || PROMPT_USER_PROFILE,
+      prompt_translate: c.prompt_translate || PROMPT_TRANSLATE,
+      prompt_reminder: c.prompt_reminder || PROMPT_REMINDER,
       has_bot_token: !!c.bot_token,
       has_navidrome_password: !!c.navidrome_password,
       has_openrouter_key: !!c.openrouter_api_key,
       has_webui_token: !!c.webui_token,
+      has_tenor_key: !!c.tenor_api_key,
       gemini_keys_count: (c.gemini_keys ?? []).length,
     };
   }
@@ -137,7 +155,10 @@ export class WebController {
     for (const key of [
       'navidrome_base_url', 'navidrome_external_url', 'navidrome_username', 'ytdl_sidecar_url',
       'deafen_move_channel_id',
-      'bot_token', 'navidrome_password', 'webui_token', // write-only secrets
+      // Prompts: vacío = mantener el actual (el default vive en código).
+      'prompt_hakka', 'prompt_rules', 'prompt_holiday', 'prompt_self_summary',
+      'prompt_user_profile', 'prompt_translate', 'prompt_reminder',
+      'bot_token', 'navidrome_password', 'webui_token', 'tenor_api_key', // write-only secrets
     ]) {
       if (typeof body[key] === 'string' && body[key].trim()) await this.config.set(key, body[key].trim());
     }

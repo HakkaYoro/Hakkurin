@@ -96,6 +96,8 @@ export class ContextBuilderService implements ContextBuilder {
       hasImage: !!ctx.imageData,
       imageNote: ctx.imageNote ?? null,
       urlContext: ctx.urlContext,
+      hakkaTpl: this.config.get<string>('prompt_hakka') || undefined,
+      rulesTpl: this.config.get<string>('prompt_rules') || undefined,
     });
 
     const imageData = ctx.imageData ? Buffer.from(ctx.imageData as Uint8Array) : null;

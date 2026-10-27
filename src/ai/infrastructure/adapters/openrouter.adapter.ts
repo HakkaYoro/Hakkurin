@@ -217,8 +217,19 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
 
     const prompt =
       userId === 'hakkurin_internal_self'
-        ? buildSelfSummaryPrompt(currentSummary, recentInteractions, formatGmt4Minute(new Date()))
-        : buildUserProfilePrompt(userId, currentSummary, recentInteractions);
+        ? buildSelfSummaryPrompt(
+            currentSummary,
+            recentInteractions,
+            formatGmt4Minute(new Date()),
+            this.config.get<string>('prompt_self_summary') || undefined,
+          )
+        : buildUserProfilePrompt(
+            userId,
+            currentSummary,
+            recentInteractions,
+            this.config.get<string>('prompt_user_profile') || undefined,
+            this.config.get<string>('developer_id') || undefined,
+          );
 
     const [text] = await this.withRetry(() =>
       this.send(model, [{ role: 'user', content: prompt }], {
@@ -233,7 +244,11 @@ export class OpenRouterAdapter implements AiBrain, OnModuleInit {
   async generateHolidayGreeting(userSummary: string, holidayName: string): Promise<string> {
     const model = this.requireModel('chat');
     if (!model) return `feliz ${holidayName} supongo...`;
-    const prompt = buildHolidayGreetingPrompt(userSummary, holidayName);
+    const prompt = buildHolidayGreetingPrompt(
+      userSummary,
+      holidayName,
+      this.config.get<string>('prompt_holiday') || undefined,
+    );
     const [text] = await this.withRetry(() =>
       this.send(model, [{ role: 'user', content: prompt }], {
         temperature: 0.9,

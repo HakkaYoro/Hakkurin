@@ -127,10 +127,10 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
     config, conversation, brain, memory,
     transport, state, stealthDm, sleep, music, events,
   );
-  const reminders = new ReminderService(memory, brain, parser, transport);
+  const reminders = new ReminderService(memory, brain, parser, config, transport);
   const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());
   const stats = { bumpMessage: vi.fn(), bumpAiCall: vi.fn(), addTokens: vi.fn() } as any;
-  const translate = new TranslateService(brain, stats);
+  const translate = new TranslateService(brain, config, stats);
   const svc = new DiscordAdapter(
     config, conversation, brain, memory,
     stealthDm, sleep,

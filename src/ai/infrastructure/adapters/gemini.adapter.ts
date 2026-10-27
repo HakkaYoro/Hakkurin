@@ -299,7 +299,11 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
 
   async generateHolidayGreeting(userSummary: string, holidayName: string): Promise<string> {
     this.getUsage(this.currentKeyIndex).registerRequest();
-    const prompt = buildHolidayGreetingPrompt(userSummary, holidayName);
+    const prompt = buildHolidayGreetingPrompt(
+      userSummary,
+      holidayName,
+      this.config.get<string>('prompt_holiday') || undefined,
+    );
     const configGen: GenerateContentConfig = { temperature: 0.9, topP: 0.95, topK: 40, maxOutputTokens: 300 };
     const result = await this.generateWithRetry(prompt, configGen, false);
     return result || `feliz ${holidayName} supongo...`;
@@ -315,9 +319,20 @@ export class GeminiAdapter implements AiBrain, OnModuleInit {
 
     let prompt: string;
     if (userId === 'hakkurin_internal_self') {
-      prompt = buildSelfSummaryPrompt(currentSummary, recentInteractions, formatGmt4Minute(new Date()));
+      prompt = buildSelfSummaryPrompt(
+        currentSummary,
+        recentInteractions,
+        formatGmt4Minute(new Date()),
+        this.config.get<string>('prompt_self_summary') || undefined,
+      );
     } else {
-      prompt = buildUserProfilePrompt(userId, currentSummary, recentInteractions);
+      prompt = buildUserProfilePrompt(
+        userId,
+        currentSummary,
+        recentInteractions,
+        this.config.get<string>('prompt_user_profile') || undefined,
+        this.config.get<string>('developer_id') || undefined,
+      );
     }
 
     const configGen: GenerateContentConfig = { temperature: 0.85, topP: 0.95, topK: 40, maxOutputTokens: 600 };

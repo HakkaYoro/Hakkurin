@@ -71,4 +71,23 @@ describe('ContextBuilderService', () => {
     expect(prompt).toContain('hola29');
     expect(prompt).not.toContain('hola5');
   });
+
+  it('orden cache-friendly: estático → historial → volátiles → mensaje', async () => {
+    const { svc } = makeBuilder();
+    const { prompt } = await svc.buildInteractionPrompt({
+      userText: 'test',
+      userId: '9',
+      userName: 'u',
+      contextMessages: ['M1: anterior'],
+      activeUserIds: [],
+    } as any);
+    // El cache es por prefijo: reglas y schema (estáticos) antes del historial;
+    // la fecha con segundos al final para no romper el prefijo en cada llamada.
+    expect(prompt.indexOf('TU TAREA')).toBeLessThan(prompt.indexOf('HISTORIAL RECIENTE'));
+    expect(prompt.indexOf('REGLAS DE PERSONALIDAD')).toBeLessThan(prompt.indexOf('HISTORIAL RECIENTE'));
+    expect(prompt.indexOf('HISTORIAL RECIENTE')).toBeLessThan(prompt.indexOf('DATOS INTERNOS'));
+    expect(prompt.indexOf('DATOS INTERNOS')).toBeLessThan(prompt.indexOf('CONTEXTO DE USUARIOS'));
+    expect(prompt.indexOf('CONTEXTO DE USUARIOS')).toBeLessThan(prompt.indexOf('FECHA Y HORA ACTUAL'));
+    expect(prompt.indexOf('FECHA Y HORA ACTUAL')).toBeLessThan(prompt.indexOf('MENSAJE ACTUAL'));
+  });
 });

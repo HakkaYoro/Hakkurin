@@ -1,14 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AiBrain } from '../../ai/domain/ports/ai-brain.port';
+import { PROMPT_TRANSLATE, fill } from '../../ai/application/ai-prompts';
+import { ConfigService } from '../../common/config.service';
 import { StatsService } from '../../stats/stats.service';
 
 const MAX_INPUT = 4000;
 const MAX_OUTPUT = 1800;
 const DEDUPE_CAP = 500;
-
-const PROMPT =
-  'Detecta el idioma del siguiente texto. Si ya está en español, tradúcelo al inglés; ' +
-  'si no, tradúcelo al español. Responde SOLO con la traducción, sin comentarios ni prefijos.\n\n';
 
 @Injectable()
 export class TranslateService {
@@ -18,6 +16,7 @@ export class TranslateService {
 
   constructor(
     @Inject(AiBrain) private readonly brain: AiBrain,
+    private readonly config: ConfigService,
     private readonly stats: StatsService,
   ) {}
 
@@ -31,7 +30,7 @@ export class TranslateService {
   async translate(text: string): Promise<string | null> {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length > MAX_INPUT) return null;
-    const out = await this.brain.generateResponse(PROMPT + trimmed);
+    const out = await this.brain.generateResponse(fill(this.config.get('prompt_translate') || PROMPT_TRANSLATE, { texto: trimmed }));
     if (!out) {
       this.logger.warn('Traducción: la IA no devolvió respuesta.');
       return null;

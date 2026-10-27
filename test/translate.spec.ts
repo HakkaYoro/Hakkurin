@@ -5,7 +5,8 @@ import { TranslateService } from '../src/discord/application/translate.service';
 function makeService(aiAnswer: string | null = 'hello') {
   const brain: any = { generateResponse: vi.fn(async () => aiAnswer) };
   const stats = { bumpAiCall: vi.fn() } as any;
-  const svc = new TranslateService(brain as unknown as AiBrain, stats);
+  const config = { get: () => '' } as any; // sin prompt_translate → default
+  const svc = new TranslateService(brain as unknown as AiBrain, config, stats);
   return { svc, brain, stats };
 }
 

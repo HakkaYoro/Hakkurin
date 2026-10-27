@@ -38,10 +38,18 @@ export interface AppConfig {
   navidrome_external_url: string;
   navidrome_username: string;
   ytdl_sidecar_url: string;
+  prompt_hakka: string;
+  prompt_rules: string;
+  prompt_holiday: string;
+  prompt_self_summary: string;
+  prompt_user_profile: string;
+  prompt_translate: string;
+  prompt_reminder: string;
   has_bot_token: boolean;
   has_navidrome_password: boolean;
   has_openrouter_key: boolean;
   has_webui_token: boolean;
+  has_tenor_key: boolean;
   gemini_keys_count: number;
 }
 
@@ -51,6 +59,7 @@ export type ConfigDraft = AppConfig & {
   bot_token: string;
   navidrome_password: string;
   webui_token: string;
+  tenor_api_key: string;
 };
 
 export interface Totals {
