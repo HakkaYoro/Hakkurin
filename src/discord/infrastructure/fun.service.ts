@@ -21,16 +21,16 @@ export function shipPercent(a: string, b: string): number {
 
 export interface ShipTier {
   min: number;
-  tags: string;
+  q: string; // query de búsqueda en KLIPY
   veredicto: string;
 }
 
 export const SHIP_TIERS: ShipTier[] = [
-  { min: 0, tags: 'anime angry slap', veredicto: 'ni con portales de another world... 💔' },
-  { min: 20, tags: 'anime annoyed hmph', veredicto: 'meh, como agua para perros 🙄' },
-  { min: 40, tags: 'anime confused sweat drop', veredicto: 'ni fu ni fa, pura neutralidad 😐' },
-  { min: 60, tags: 'anime couple blushing', veredicto: 'se nota la química, eh 💕' },
-  { min: 80, tags: 'anime wedding kiss', veredicto: '¡boda en el santuario YA! 💍✨' },
+  { min: 0, q: 'anime angry slap', veredicto: 'ni con portales de another world... 💔' },
+  { min: 20, q: 'anime annoyed', veredicto: 'meh, como agua para perros 🙄' },
+  { min: 40, q: 'anime confused', veredicto: 'ni fu ni fa, pura neutralidad 😐' },
+  { min: 60, q: 'anime couple cuddle', veredicto: 'se nota la química, eh 💕' },
+  { min: 80, q: 'anime couple kiss', veredicto: '¡boda en el santuario YA! 💍✨' },
 ];
 
 export function shipTags(pct: number): ShipTier {
@@ -57,55 +57,61 @@ async function jikanGet(path: string): Promise<any | null> {
   }
 }
 
-async function waifuPics(category: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://api.waifu.pics/sfw/${category}`, {
-      headers: { 'User-Agent': UA },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return null;
-    const json: any = await res.json();
-    return json?.url ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function tenorGif(tags: string, apiKey: string): Promise<string | null> {
+// KLIPY (reemplazo de Tenor, descontinuado 2026): key de partner.klipy.com viaja
+// en el path. Parseo defensivo: la doc no fija el nombre de la colección bajo
+// data ni las claves de files, y sin key devolvemos null (los embeds degradan).
+async function klipyGif(q: string, apiKey: string): Promise<string | null> {
   if (!apiKey) return null;
   try {
-    const q = new URLSearchParams({ q: tags, key: apiKey, limit: '8', random: 'true', media_filter: 'gif' });
-    const res = await fetch(`https://tenor.googleapis.com/v2/search?${q}`, {
+    const params = new URLSearchParams({ q, per_page: '8', rating: 'pg-13', locale: 'us_US' });
+    const res = await fetch(`https://api.klipy.com/api/v1/${apiKey}/gifs/search?${params}`, {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return null;
     const json: any = await res.json();
-    return json?.results?.[0]?.media_formats?.gif?.url ?? null;
+    const items = json?.data?.items ?? json?.data?.gifs ?? json?.data?.results ?? (Array.isArray(json?.data) ? json.data : []);
+    const files = items[Math.floor(Math.random() * items.length)]?.files;
+    if (!files || typeof files !== 'object') return null;
+    const first = Object.values(files).find((f: any) => typeof f?.url === 'string') as any;
+    return first?.url ?? null;
   } catch {
     return null;
   }
 }
 
+const WAIFU_QUERIES: Record<string, string> = {
+  waifu: 'anime waifu',
+  husbando: 'anime husbando',
+  neko: 'anime neko',
+  shinobu: 'shinobu ochaco fanart anime',
+  megumin: 'megumin anime',
+  awoo: 'anime wolf girl',
+};
+
 interface Accion {
-  ep: string; // endpoint waifu.pics
+  q: string; // query de búsqueda en KLIPY
   con: string; // frase con objetivo
   solo: string; // frase sin objetivo
 }
 
 const ACCIONES: Record<string, Accion> = {
-  abrazar: { ep: 'hug', con: 'abraza a', solo: 'reparto abrazos gratis, ¿alguien? 🤗' },
-  acariciar: { ep: 'pat', con: 'acaricia la cabeza de', solo: 'doy caricias en la cabeza 💗' },
-  bofetada: { ep: 'slap', con: 'bofetea a', solo: 'tengo la mano inquieta... quien caiga, cae 👋' },
-  besar: { ep: 'kiss', con: 'besa a', solo: 'busco a quien besar, hagan fila 😳' },
-  morder: { ep: 'bite', con: 'muerde a', solo: 'ando mordelona hoy, cuidado 🦷' },
-  bonk: { ep: 'bonk', con: 'bonkea a', solo: 'bonk disponible para mentes sucias 🔨' },
-  achuchar: { ep: 'cuddle', con: 'se achucha con', solo: 'necesito achuchones urgentes 🥺' },
+  abrazar: { q: 'anime hug', con: 'abraza a', solo: 'reparto abrazos gratis, ¿alguien? 🤗' },
+  acariciar: { q: 'anime head pat', con: 'acaricia la cabeza de', solo: 'doy caricias en la cabeza 💗' },
+  bofetada: { q: 'anime slap', con: 'bofetea a', solo: 'tengo la mano inquieta... quien caiga, cae 👋' },
+  besar: { q: 'anime kiss', con: 'besa a', solo: 'busco a quien besar, hagan fila 😳' },
+  morder: { q: 'anime bite', con: 'muerde a', solo: 'ando mordelona hoy, cuidado 🦷' },
+  bonk: { q: 'anime bonk', con: 'bonkea a', solo: 'bonk disponible para mentes sucias 🔨' },
+  achuchar: { q: 'anime cuddle', con: 'se achucha con', solo: 'necesito achuchones urgentes 🥺' },
 };
 
 @Injectable()
 export class FunService {
   constructor(private readonly config: ConfigService) {}
+
+  private klipyKey(): string {
+    return this.config.get<string>('klipy_api_key', '');
+  }
 
   private footer(e: EmbedBuilder): EmbedBuilder {
     return e.setFooter({ text: `${this.config.get('bot_name', 'Hakkurin')} ♡` }).setTimestamp();
@@ -189,13 +195,13 @@ export class FunService {
 
   async handleWaifu(i: ChatInputCommandInteraction, category: string): Promise<void> {
     await i.deferReply().catch(() => {});
-    const url = await waifuPics(category);
-    if (!url) {
-      await i.editReply({ embeds: [this.errorEmbed('waifu.pics no respondió... quédate con tu imaginación por hoy.')] }).catch(() => {});
+    const gif = await klipyGif(WAIFU_QUERIES[category] ?? 'anime girl', this.klipyKey());
+    if (!gif) {
+      await i.editReply({ embeds: [this.errorEmbed('KLIPY no respondió (o falta la key en la WebUI → IA)... quédate con tu imaginación por hoy.')] }).catch(() => {});
       return;
     }
     const e = this.footer(
-      new EmbedBuilder().setTitle('💌 Tu dosis diaria de 2D').setColor(COLOR_WAIFU).setImage(url),
+      new EmbedBuilder().setTitle('💌 Tu dosis diaria de 2D').setColor(COLOR_WAIFU).setImage(gif),
     );
     await i.editReply({ embeds: [e] }).catch(() => {});
   }
@@ -207,7 +213,7 @@ export class FunService {
       await i.editReply({ embeds: [this.errorEmbed('No conozco esa acción, baka.')] }).catch(() => {});
       return;
     }
-    const gif = await waifuPics(accion.ep);
+    const gif = await klipyGif(accion.q, this.klipyKey());
     const autor = i.user.displayName ?? i.user.username;
     const objetivo = targetId ? `<@${targetId}>` : null;
     const frase = objetivo ? `**${autor}** ${accion.con} ${objetivo}` : `**${autor}** ${accion.solo}`;
@@ -221,8 +227,8 @@ export class FunService {
     await i.deferReply().catch(() => {});
     const auto = u1.id === u2.id;
     const pct = auto ? 100 : shipPercent(u1.id, u2.id);
-    const { tags, veredicto } = shipTags(pct);
-    const gif = await tenorGif(tags, this.config.get<string>('tenor_api_key', ''));
+    const { q, veredicto } = shipTags(pct);
+    const gif = await klipyGif(q, this.klipyKey());
     const hearts = Math.round(pct / 10);
     const bar = '❤️'.repeat(hearts) + '🖤'.repeat(10 - hearts);
     const nombre = (u: User) => u.displayName ?? u.username;

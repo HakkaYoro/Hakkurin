@@ -22,7 +22,7 @@ describe('shipPercent', () => {
 describe('shipTags', () => {
   it('cada rango cae en su tier y el 100 cae en el mejor', () => {
     expect(shipTags(0).min).toBe(0);
-    expect(shipTags(19).tags).toBe(SHIP_TIERS[0].tags);
+    expect(shipTags(19).q).toBe(SHIP_TIERS[0].q);
     expect(shipTags(20).min).toBe(20);
     expect(shipTags(55).min).toBe(40);
     expect(shipTags(100).min).toBe(80);
@@ -46,8 +46,8 @@ describe('fill', () => {
 // Handlers: fetch global stubbeado por dominio; aserciones sobre el embed que
 // llega a editReply (mismo estilo que los tests de music-ui).
 
-function makeConfig(tenorKey = ''): any {
-  return { get: (k: string, d?: any) => (k === 'tenor_api_key' ? tenorKey : d ?? '') };
+function makeConfig(klipyKey = ''): any {
+  return { get: (k: string, d?: any) => (k === 'klipy_api_key' ? klipyKey : d ?? '') };
 }
 
 function makeInteraction(): any {
@@ -69,9 +69,8 @@ function user(id: string, name: string): any {
 
 interface Fixtures {
   jikan?: any;
-  waifu?: any;
-  tenor?: any;
-  fail?: 'all' | 'jikan' | 'waifu' | 'tenor';
+  klipy?: any;
+  fail?: 'all' | 'jikan' | 'klipy';
 }
 
 function stubFetch(f: Fixtures): void {
@@ -79,11 +78,10 @@ function stubFetch(f: Fixtures): void {
     'fetch',
     vi.fn(async (url: any) => {
       const u = String(url);
-      const which = u.includes('jikan') ? 'jikan' : u.includes('waifu.pics') ? 'waifu' : u.includes('tenor') ? 'tenor' : '';
+      const which = u.includes('jikan') ? 'jikan' : u.includes('klipy') ? 'klipy' : '';
       if (f.fail === 'all' || f.fail === which) throw new Error('red caída');
       if (which === 'jikan') return { ok: true, json: async () => f.jikan ?? { data: [] } };
-      if (which === 'waifu') return { ok: true, json: async () => f.waifu ?? {} };
-      if (which === 'tenor') return { ok: true, json: async () => f.tenor ?? {} };
+      if (which === 'klipy') return { ok: true, json: async () => f.klipy ?? {} };
       throw new Error(`fetch inesperado: ${u}`);
     }),
   );
@@ -164,40 +162,40 @@ describe('FunService — handlers', () => {
     expect(e.description).toContain('`2.` [Dos](https://mal/2) — ⭐ —');
   });
 
-  it('/waifu: embed con la imagen; API caída → error embed sin lanzar', async () => {
-    const svc = new FunService(makeConfig());
-    stubFetch({ waifu: { url: 'http://w/1.gif' } });
+  it('/waifu: embed con el gif de KLIPY; sin respuesta → error embed sin lanzar', async () => {
+    const svc = new FunService(makeConfig('KEY-KLIPY'));
+    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/1.gif' } } }] } } });
     const i = makeInteraction();
     await svc.handleWaifu(i, 'neko');
-    expect(embedOf(i).image.url).toBe('http://w/1.gif');
+    expect(embedOf(i).image.url).toBe('http://k/1.gif');
 
-    stubFetch({ fail: 'waifu' });
+    stubFetch({ fail: 'klipy' });
     const i2 = makeInteraction();
     await svc.handleWaifu(i2, 'neko');
-    expect(embedOf(i2).description).toContain('no respondió');
+    expect(embedOf(i2).description).toContain('KLIPY');
   });
 
   it('/accion: con objetivo arma "Autor abraza a <@id>"; sin objetivo usa la frase solo', async () => {
-    const svc = new FunService(makeConfig());
-    stubFetch({ waifu: { url: 'http://w/hug.gif' } });
+    const svc = new FunService(makeConfig('KEY-KLIPY'));
+    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/hug.gif' } } }] } } });
     const i = makeInteraction();
     await svc.handleAccion(i, 'abrazar', '555');
     const e = embedOf(i);
     expect(e.description).toBe('**Autor** abraza a <@555>');
-    expect(e.image.url).toBe('http://w/hug.gif');
+    expect(e.image.url).toBe('http://k/hug.gif');
 
     const i2 = makeInteraction();
     await svc.handleAccion(i2, 'abrazar', null);
     expect(embedOf(i2).description).toContain('reparto abrazos gratis');
   });
 
-  it('/ship: % determinista en la descripción, barra consistente y gif de Tenor solo con key', async () => {
+  it('/ship: % determinista en la descripción, barra consistente y gif de KLIPY solo con key', async () => {
     const u1 = user('111', 'Ana');
     const u2 = user('222', 'Beto');
     const pct = shipPercent('111', '222');
 
-    stubFetch({ tenor: { results: [{ media_formats: { gif: { url: 'http://t/love.gif' } } }] } });
-    const svc = new FunService(makeConfig('KEY-TENOR'));
+    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/love.gif' } } }] } } });
+    const svc = new FunService(makeConfig('KEY-KLIPY'));
     const i = makeInteraction();
     await svc.handleShip(i, u1, u2);
     const e = embedOf(i);
@@ -205,9 +203,9 @@ describe('FunService — handlers', () => {
     expect(e.description).toContain(`**${pct}%**`);
     expect(e.description).toContain('❤️'.repeat(Math.round(pct / 10)));
     expect(e.thumbnail.url).toBe('http://av/111');
-    expect(e.image.url).toBe('http://t/love.gif');
+    expect(e.image.url).toBe('http://k/love.gif');
 
-    // Sin key: ni consulta a Tenor ni imagen, pero el embed sale igual.
+    // Sin key: ni consulta a KLIPY ni imagen, pero el embed sale igual.
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const i2 = makeInteraction();

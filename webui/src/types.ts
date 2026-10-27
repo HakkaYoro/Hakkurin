@@ -49,7 +49,7 @@ export interface AppConfig {
   has_navidrome_password: boolean;
   has_openrouter_key: boolean;
   has_webui_token: boolean;
-  has_tenor_key: boolean;
+  has_klipy_key: boolean;
   gemini_keys_count: number;
 }
 
@@ -59,7 +59,7 @@ export type ConfigDraft = AppConfig & {
   bot_token: string;
   navidrome_password: string;
   webui_token: string;
-  tenor_api_key: string;
+  klipy_api_key: string;
 };
 
 export interface Totals {
