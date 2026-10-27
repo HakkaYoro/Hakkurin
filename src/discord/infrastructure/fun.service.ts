@@ -1,10 +1,11 @@
 // Comandos for-fun (anime/otaku). Embeds al estilo de music-ui: título con
 // emoji, color por familia, footer del bot, thumbnail/imagen cuando aporta.
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EmbedBuilder, type ChatInputCommandInteraction, type User } from 'discord.js';
 import { ConfigService } from '../../common/config.service';
 
 const UA = 'Hakkurin/1.0 (Discord bot)';
+const logger = new Logger('fun');
 
 // Paleta otaku: info=violeta, waifu/acción=rosa, ship=fucsia.
 const COLOR_INFO = 0x9b59b6;
@@ -50,32 +51,48 @@ async function jikanGet(path: string): Promise<any | null> {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logger.warn(`jikan ${path.split('?')[0]}: HTTP ${res.status}`);
+      return null;
+    }
     return await res.json();
-  } catch {
+  } catch (e) {
+    logger.warn(`jikan ${path.split('?')[0]}: ${(e as Error).message}`);
     return null;
   }
 }
 
-// KLIPY (reemplazo de Tenor, descontinuado 2026): key de partner.klipy.com viaja
-// en el path. Parseo defensivo: la doc no fija el nombre de la colección bajo
-// data ni las claves de files, y sin key devolvemos null (los embeds degradan).
+// KLIPY (reemplazo de Tenor, descontinuado 2026): key viaja en el path — JAMÁS
+// loguear la URL completa. customer_id es requerido por el endpoint; los
+// resultados van en data.items[] con variantes de media (files anidadas o planas).
 async function klipyGif(q: string, apiKey: string): Promise<string | null> {
   if (!apiKey) return null;
   try {
-    const params = new URLSearchParams({ q, per_page: '8', rating: 'pg-13', locale: 'us_US' });
+    const params = new URLSearchParams({
+      q,
+      per_page: '8',
+      content_filter: 'low',
+      locale: 'us_US',
+      customer_id: 'hakkurin',
+    });
     const res = await fetch(`https://api.klipy.com/api/v1/${apiKey}/gifs/search?${params}`, {
       headers: { 'User-Agent': UA },
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      logger.warn(`klipy "${q}": HTTP ${res.status}`);
+      return null;
+    }
     const json: any = await res.json();
     const items = json?.data?.items ?? json?.data?.gifs ?? json?.data?.results ?? (Array.isArray(json?.data) ? json.data : []);
-    const files = items[Math.floor(Math.random() * items.length)]?.files;
-    if (!files || typeof files !== 'object') return null;
-    const first = Object.values(files).find((f: any) => typeof f?.url === 'string') as any;
+    const item = items[Math.floor(Math.random() * items.length)];
+    // files anidadas (item.files.{gif,webp,...}.url) o variantes planas en el item.
+    const files = item?.files && typeof item.files === 'object' ? item.files : item;
+    const first = Object.values(files ?? {}).find((f: any) => typeof f?.url === 'string') as any;
+    if (!first?.url) logger.warn(`klipy "${q}": respuesta sin gif usable`);
     return first?.url ?? null;
-  } catch {
+  } catch (e) {
+    logger.warn(`klipy "${q}": ${(e as Error).message}`);
     return null;
   }
 }
@@ -111,6 +128,12 @@ export class FunService {
 
   private klipyKey(): string {
     return this.config.get<string>('klipy_api_key', '');
+  }
+
+  // Sin key el gif SIEMPRE falta: la nota va en el embed; con key los fallos
+  // sólo se degradan en silencio (la razón queda en el log del contenedor).
+  private keyNote(): string {
+    return this.klipyKey() ? '' : '\n\n🔑 Falta la key KLIPY (WebUI → IA).';
   }
 
   private footer(e: EmbedBuilder): EmbedBuilder {
@@ -195,9 +218,13 @@ export class FunService {
 
   async handleWaifu(i: ChatInputCommandInteraction, category: string): Promise<void> {
     await i.deferReply().catch(() => {});
-    const gif = await klipyGif(WAIFU_QUERIES[category] ?? 'anime girl', this.klipyKey());
+    const key = this.klipyKey();
+    const gif = await klipyGif(WAIFU_QUERIES[category] ?? 'anime girl', key);
     if (!gif) {
-      await i.editReply({ embeds: [this.errorEmbed('KLIPY no respondió (o falta la key en la WebUI → IA)... quédate con tu imaginación por hoy.')] }).catch(() => {});
+      const msg = key
+        ? 'KLIPY no respondió, inténtalo luego... quédate con tu imaginación por hoy.'
+        : 'No tengo gifs sin una key de KLIPY — ponla en la WebUI → IA y vuelve.';
+      await i.editReply({ embeds: [this.errorEmbed(msg)] }).catch(() => {});
       return;
     }
     const e = this.footer(
@@ -217,7 +244,7 @@ export class FunService {
     const autor = i.user.displayName ?? i.user.username;
     const objetivo = targetId ? `<@${targetId}>` : null;
     const frase = objetivo ? `**${autor}** ${accion.con} ${objetivo}` : `**${autor}** ${accion.solo}`;
-    const e = this.footer(new EmbedBuilder().setDescription(frase).setColor(COLOR_WAIFU));
+    const e = this.footer(new EmbedBuilder().setDescription(frase + this.keyNote()).setColor(COLOR_WAIFU));
     if (gif) e.setImage(gif);
     if (targetId) e.setThumbnail(i.user.displayAvatarURL());
     await i.editReply({ embeds: [e] }).catch(() => {});
@@ -237,7 +264,7 @@ export class FunService {
       new EmbedBuilder()
         .setTitle(titulo)
         .setColor(COLOR_SHIP)
-        .setDescription(`${bar}\n**${pct}%** — ${veredicto}`),
+        .setDescription(`${bar}\n**${pct}%** — ${veredicto}${this.keyNote()}`),
     );
     e.setThumbnail(u1.displayAvatarURL());
     if (gif) e.setImage(gif);

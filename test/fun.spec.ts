@@ -73,18 +73,17 @@ interface Fixtures {
   fail?: 'all' | 'jikan' | 'klipy';
 }
 
-function stubFetch(f: Fixtures): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: any) => {
-      const u = String(url);
-      const which = u.includes('jikan') ? 'jikan' : u.includes('klipy') ? 'klipy' : '';
-      if (f.fail === 'all' || f.fail === which) throw new Error('red caída');
-      if (which === 'jikan') return { ok: true, json: async () => f.jikan ?? { data: [] } };
-      if (which === 'klipy') return { ok: true, json: async () => f.klipy ?? {} };
-      throw new Error(`fetch inesperado: ${u}`);
-    }),
-  );
+function stubFetch(f: Fixtures): any {
+  const mock = vi.fn(async (url: any) => {
+    const u = String(url);
+    const which = u.includes('jikan') ? 'jikan' : u.includes('klipy') ? 'klipy' : '';
+    if (f.fail === 'all' || f.fail === which) throw new Error('red caída');
+    if (which === 'jikan') return { ok: true, json: async () => f.jikan ?? { data: [] } };
+    if (which === 'klipy') return { ok: true, json: async () => f.klipy ?? {} };
+    throw new Error(`fetch inesperado: ${u}`);
+  });
+  vi.stubGlobal('fetch', mock);
+  return mock;
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -162,17 +161,36 @@ describe('FunService — handlers', () => {
     expect(e.description).toContain('`2.` [Dos](https://mal/2) — ⭐ —');
   });
 
-  it('/waifu: embed con el gif de KLIPY; sin respuesta → error embed sin lanzar', async () => {
+  it('/waifu: gif de KLIPY con customer_id; sin key y con fallo dan mensajes distintos', async () => {
+    const fm = stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/1.gif' } } }] } } });
     const svc = new FunService(makeConfig('KEY-KLIPY'));
-    stubFetch({ klipy: { result: true, data: { items: [{ files: { gif: { url: 'http://k/1.gif' } } }] } } });
     const i = makeInteraction();
     await svc.handleWaifu(i, 'neko');
     expect(embedOf(i).image.url).toBe('http://k/1.gif');
+    const url = String(fm.mock.calls[0][0]);
+    expect(url).toContain('customer_id=');
+    expect(url).toContain('content_filter=low');
 
+    // Con key y KLIPY caído: "no respondió" (la razón queda en el log).
     stubFetch({ fail: 'klipy' });
     const i2 = makeInteraction();
     await svc.handleWaifu(i2, 'neko');
-    expect(embedOf(i2).description).toContain('KLIPY');
+    expect(embedOf(i2).description).toContain('KLIPY no respondió');
+
+    // Sin key: mensaje propio y ni siquiera hay fetch.
+    const fm2 = stubFetch({ klipy: {} });
+    const i3 = makeInteraction();
+    await new FunService(makeConfig()).handleWaifu(i3, 'neko');
+    expect(embedOf(i3).description).toContain('key de KLIPY');
+    expect(fm2).not.toHaveBeenCalled();
+  });
+
+  it('/waifu: acepta variantes planas del item (sin files anidado)', async () => {
+    stubFetch({ klipy: { result: true, data: { items: [{ gif: { url: 'http://k/flat.gif' }, max_1mb_gif: { url: 'http://k/big.gif' } }] } } });
+    const svc = new FunService(makeConfig('KEY-KLIPY'));
+    const i = makeInteraction();
+    await svc.handleWaifu(i, 'waifu');
+    expect(embedOf(i).image.url).toBe('http://k/flat.gif');
   });
 
   it('/accion: con objetivo arma "Autor abraza a <@id>"; sin objetivo usa la frase solo', async () => {
@@ -185,8 +203,13 @@ describe('FunService — handlers', () => {
     expect(e.image.url).toBe('http://k/hug.gif');
 
     const i2 = makeInteraction();
-    await svc.handleAccion(i2, 'abrazar', null);
+    await new FunService(makeConfig()).handleAccion(i2, 'abrazar', null);
     expect(embedOf(i2).description).toContain('reparto abrazos gratis');
+
+    // Sin key la nota de configuración aparece en el embed.
+    const i3 = makeInteraction();
+    await new FunService(makeConfig()).handleAccion(i3, 'bonk', null);
+    expect(embedOf(i3).description).toContain('Falta la key KLIPY');
   });
 
   it('/ship: % determinista en la descripción, barra consistente y gif de KLIPY solo con key', async () => {
@@ -205,13 +228,14 @@ describe('FunService — handlers', () => {
     expect(e.thumbnail.url).toBe('http://av/111');
     expect(e.image.url).toBe('http://k/love.gif');
 
-    // Sin key: ni consulta a KLIPY ni imagen, pero el embed sale igual.
+    // Sin key: ni consulta a KLIPY ni imagen, pero el embed sale con la nota.
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const i2 = makeInteraction();
     await new FunService(makeConfig()).handleShip(i2, u1, u2);
     const e2 = embedOf(i2);
     expect(e2.description).toContain(`**${pct}%**`);
+    expect(e2.description).toContain('Falta la key KLIPY');
     expect(e2.image).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
 
