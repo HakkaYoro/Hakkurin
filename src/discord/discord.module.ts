@@ -7,6 +7,7 @@ import { StealthDmService } from './application/stealth-dm.service';
 import { SleepService } from './application/sleep.service';
 import { SlashCommandsService } from './infrastructure/slash-commands.service';
 import { MusicUiService } from './infrastructure/music-ui.service';
+import { FunService } from './infrastructure/fun.service';
 import { HolidayStoreAdapter } from './infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from './infrastructure/persistence/sleep-store.adapter';
 import { ActionParserService } from './application/action-parser.service';
@@ -33,6 +34,7 @@ import { SleepStorePort } from './domain/ports/json-store.port';
     SleepStoreAdapter,
     SlashCommandsService,
     MusicUiService,
+    FunService,
     ActionParserService,
     TranslateService,
     DiscordAdapter,

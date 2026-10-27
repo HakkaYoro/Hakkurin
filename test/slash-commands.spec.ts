@@ -25,8 +25,17 @@ function makeFakes(over: Record<string, any> = {}) {
   } as any;
   const musicUi = new MusicUiService(music, navidrome);
   const stats = { bumpCommand: vi.fn(), bumpAiCall: vi.fn(), addTokens: vi.fn() };
-  const svc = new SlashCommandsService(music, musicUi, stats as any);
-  return { svc, music, navidrome, musicUi, stats };
+  const fun = {
+    handleAnime: vi.fn(async () => {}),
+    handleManga: vi.fn(async () => {}),
+    handleTemporada: vi.fn(async () => {}),
+    handleWaifu: vi.fn(async () => {}),
+    handleAccion: vi.fn(async () => {}),
+    handleShip: vi.fn(async () => {}),
+    handleUwu: vi.fn(async () => {}),
+  };
+  const svc = new SlashCommandsService(music, musicUi, fun as any, stats as any);
+  return { svc, music, navidrome, musicUi, stats, fun };
 }
 
 function chatInteraction(over: Record<string, any> = {}) {
@@ -46,13 +55,16 @@ function chatInteraction(over: Record<string, any> = {}) {
 }
 
 describe('SlashCommandsService — registro y ruteo', () => {
-  it('register publica los 6 comandos globalmente', async () => {
+  it('register publica todos los comandos globalmente (música + fun)', async () => {
     const { svc } = makeFakes();
     const set = vi.fn(async (_cmds: any[]) => {});
     await svc.register({ application: { commands: { set } } } as any);
     expect(set).toHaveBeenCalledTimes(1);
     const names = set.mock.calls[0][0].map((c: any) => c.name);
-    expect(names).toEqual(['play', 'skip', 'stop', 'queue', 'search', 'radio']);
+    expect(names).toEqual([
+      'play', 'skip', 'stop', 'queue', 'search', 'radio',
+      'anime', 'manga', 'temporada', 'waifu', 'accion', 'ship', 'uwu',
+    ]);
   });
 
   it('register sin fallos aunque la API rechace', async () => {
@@ -86,6 +98,20 @@ describe('SlashCommandsService — registro y ruteo', () => {
     const { svc, stats } = makeFakes();
     await svc.handle(chatInteraction());
     expect(stats.bumpCommand).toHaveBeenCalledWith('play', 'u1');
+  });
+
+  it('comandos fun rutean a FunService', async () => {
+    const { svc, fun } = makeFakes();
+    const user = { id: 'u2', username: 'Bob' };
+    const opts = () => ({ getString: vi.fn(() => 'algo'), getUser: vi.fn(() => user) });
+    await svc.handle(chatInteraction({ commandName: 'temporada', options: opts() }));
+    await svc.handle(chatInteraction({ commandName: 'waifu', options: opts() }));
+    await svc.handle(chatInteraction({ commandName: 'ship', options: opts() }));
+    await svc.handle(chatInteraction({ commandName: 'uwu', options: opts() }));
+    expect(fun.handleTemporada).toHaveBeenCalledTimes(1);
+    expect(fun.handleWaifu).toHaveBeenCalledWith(expect.anything(), 'algo');
+    expect(fun.handleShip).toHaveBeenCalledWith(expect.anything(), user, user);
+    expect(fun.handleUwu).toHaveBeenCalledWith(expect.anything(), 'algo');
   });
 
   it('componentes van a handleButton; el rechazo del handler sube a bindEvents (.catch)', async () => {
