@@ -69,7 +69,7 @@ describe('StatsService — contadores por usuario/comando/modelo', () => {
 });
 
 describe('StatsService — rankings por ventanas de horas', () => {
-  it('ventana, período previo, serie horaria/diaria y heatmap de 30 días', async () => {
+  it('ventana, período previo, serie horaria/diaria y heatmap de un año', async () => {
     const svc = await seed({
       [hKey(1)]: bucket({ messages: 5, users: { b: 5 }, commands: { skip: 3 }, commandUsers: { skip: { b: 3 } }, tokensIn: 50, tokensOut: 5, tokensCached: 25, cost: 0.5, models: { 'm/nuevo': 3 }, aiCalls: { response: 2 } }),
       [hKey(2)]: bucket({ messages: 2, users: { a: 1, b: 1 }, commands: { play: 2 }, commandUsers: { play: { b: 2 } }, tokensIn: 20, tokensOut: 2, tokensCached: 5, cost: 0.2, models: { 'm/nuevo': 2 }, aiCalls: { analyze: 1 } }),
@@ -102,8 +102,27 @@ describe('StatsService — rankings por ventanas de horas', () => {
     expect(r720.series).toHaveLength(30); // diaria
     expect(r720.series.reduce((a, s) => a + s.messages, 0)).toBe(8);
     expect(r720.models.map((m) => m.model)).toEqual(['m/nuevo', 'm/viejo']);
-    expect(r720.heatmap).toHaveLength(30);
+    expect(r720.heatmap).toHaveLength(366);
     expect(r720.heatmap.reduce((a, d) => a + d.messages, 0)).toBe(8);
+  });
+
+  it('flush compacta buckets horarios de hace >7 días a claves de día', async () => {
+    const svc = await seed({
+      [hKey(240)]: bucket({ messages: 4, users: { a: 4 }, commands: { play: 2 }, commandUsers: { play: { a: 2 } }, models: { 'm/viejo': 1 }, aiCalls: { response: 1 } }),
+      [hKey(1)]: bucket({ messages: 2, users: { b: 2 } }),
+    });
+    await (svc as any).flush();
+    const saved = JSON.parse(fs.readFileSync(FILE, 'utf-8'));
+    const dayKey = hKey(240).slice(0, 10);
+    expect(saved[hKey(240)]).toBeUndefined(); // el bucket horario viejo desapareció
+    expect(saved[hKey(1)]).toBeDefined(); // el reciente sigue horario
+    expect(saved[dayKey].messages).toBe(4);
+    expect(saved[dayKey].users).toEqual({ a: 4 });
+    expect(saved[dayKey].commands).toEqual({ play: 2 });
+    expect(saved[dayKey].commandUsers).toEqual({ play: { a: 2 } });
+    // El bucket de día sigue contando en rankings y heatmap.
+    expect(svc.rankings(720).totals.messages).toBe(6);
+    expect(svc.rankings(720).heatmap.reduce((a, d) => a + d.messages, 0)).toBe(6);
   });
 
   it('sin buckets → rankings vacíos pero bien formados', () => {
@@ -115,7 +134,7 @@ describe('StatsService — rankings por ventanas de horas', () => {
     expect(r.users).toEqual([]);
     expect(r.commands).toEqual([]);
     expect(r.models).toEqual([]);
-    expect(r.heatmap).toHaveLength(30);
+    expect(r.heatmap).toHaveLength(366);
   });
 });
 

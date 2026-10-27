@@ -4,7 +4,12 @@ import * as fs from 'fs';
 import { atomicWrite, gmt4Date } from '../common/util';
 
 const STATS_FILE = 'data/stats.json';
-const KEEP_DAYS = 30;
+const KEEP_DAYS = 366;
+// Los buckets horarios de hace más de 7 días se compactan a buckets de día
+// (clave 'YYYY-MM-DD', el formato legacy ya soportado): un año cabe en ~400
+// buckets. Trade-off: las ventanas de 1 sem/1 mes cuentan el día completo en
+// el borde de corte.
+const KEEP_HOURLY_DAYS = 7;
 
 // Buckets por HORA (clave 'YYYY-MM-DDTHH', GMT-4): permiten ventanas de 1h/24h;
 // los rangos de 1 sem / 1 mes agrupan por día. Los stats.json antiguos (claves
@@ -278,12 +283,41 @@ export class StatsService implements OnModuleDestroy {
     };
   }
 
+  // Fusiona el bucket horario en el de su día (mapas sumados) y lo borra.
+  private compactToDay(hourKey: string): void {
+    const h = this.buckets.get(hourKey)!;
+    const dayKey = hourKey.slice(0, 10);
+    let d = this.buckets.get(dayKey);
+    if (!d) {
+      d = emptyDay();
+      this.buckets.set(dayKey, d);
+    }
+    d.messages += h.messages;
+    d.tokensIn += h.tokensIn;
+    d.tokensOut += h.tokensOut;
+    d.tokensCached += h.tokensCached;
+    d.cost += h.cost ?? 0;
+    for (const [k, n] of Object.entries(h.aiCalls)) d.aiCalls[k] = (d.aiCalls[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(h.models)) d.models[k] = (d.models[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(h.users)) d.users[k] = (d.users[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(h.commands)) d.commands[k] = (d.commands[k] ?? 0) + n;
+    for (const [cmd, perUser] of Object.entries(h.commandUsers)) {
+      const acc = d.commandUsers[cmd] ?? (d.commandUsers[cmd] = {});
+      for (const [u, n] of Object.entries(perUser)) acc[u] = (acc[u] ?? 0) + n;
+    }
+    this.buckets.delete(hourKey);
+  }
+
   @Interval(60000)
   private async flush(): Promise<void> {
     await this.loadPromise;
-    const cutoff = dayKeyOf(new Date(Date.now() - KEEP_DAYS * 86_400_000));
-    for (const key of this.buckets.keys()) {
-      if (key.slice(0, 10) < cutoff) this.buckets.delete(key);
+    const now = new Date();
+    const hourlyCutoff = dayKeyOf(new Date(now.getTime() - KEEP_HOURLY_DAYS * 86_400_000));
+    const keepCutoff = dayKeyOf(new Date(now.getTime() - KEEP_DAYS * 86_400_000));
+    for (const key of [...this.buckets.keys()]) {
+      const day = key.slice(0, 10);
+      if (day < keepCutoff) this.buckets.delete(key);
+      else if (key.length > 10 && day < hourlyCutoff) this.compactToDay(key);
     }
     try {
       await atomicWrite(STATS_FILE, JSON.stringify(Object.fromEntries(this.buckets)));

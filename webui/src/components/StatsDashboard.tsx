@@ -175,7 +175,10 @@ export default function StatsDashboard() {
       </div>
 
       <section className="card">
-        <h2>Actividad diaria (últimos 30 días)</h2>
+        <h2>Actividad diaria</h2>
+        <p className="heat-summary">
+          <strong className="num">{fmtInt(data.heatmap.reduce((a, d) => a + d.messages, 0))}</strong> mensajes en el último año
+        </p>
         <Heatmap data={data.heatmap} />
       </section>
 
