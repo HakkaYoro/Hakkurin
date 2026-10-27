@@ -3,10 +3,6 @@
 
 const DDG_URL = 'https://html.duckduckgo.com/html/';
 
-function buildResult(title: string, link: string, snippet: string): string {
-  return `- [${title}](${link}): ${snippet}`;
-}
-
 export async function searchDdg(rawQuery: string): Promise<string> {
   // Limpieza proactiva: quitar año para evitar resultados demasiado específicos/vacíos.
   let query = rawQuery.replace(/2025/g, '').trim();
@@ -57,7 +53,7 @@ function parseResults(html: string): string[] {
   }
 
   for (let i = 0; i < links.length; i++) {
-    out.push(buildResult(links[i].title, links[i].url, snippets[i] || ''));
+    out.push(`- [${links[i].title}](${links[i].url}): ${snippets[i] || ''}`);
   }
   return out;
 }

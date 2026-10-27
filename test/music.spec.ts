@@ -57,13 +57,13 @@ function makeFakeVoice(over: Record<string, any> = {}) {
   const lost: Record<string, ((why: string) => void) | undefined> = {};
   const voice: any = {
     ensureConnection: vi.fn(async (gid: string, _vc: any, onLost?: (why: string) => void) => {
-      const conn = { guildId: gid, subscribe: vi.fn(), destroy: vi.fn(), on: vi.fn() };
+      const conn = { guildId: gid, subscribe: vi.fn(), destroy: vi.fn() };
       conns.set(gid, conn);
       lost[gid] = onLost;
       return conn;
     }),
     createPlayer: vi.fn((_gid: string, _onIdle: () => void) => {
-      const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn(), on: vi.fn() };
+      const player = { state: { status: 'idle' }, play: vi.fn(), stop: vi.fn() };
       players.push(player);
       return player;
     }),
@@ -401,7 +401,7 @@ describe('MusicService — isIdle (para el auto-update del sidecar)', () => {
   it('player no-Idle en algún guild → NO idle', () => {
     const { svc } = makeService();
     const s = (svc as any).state('g1');
-    s.player = { state: { status: 'playing' }, stop: vi.fn(), play: vi.fn(), on: vi.fn() };
+    s.player = { state: { status: 'playing' }, stop: vi.fn(), play: vi.fn() };
     expect(svc.isIdle()).toBe(false);
   });
 

@@ -63,7 +63,6 @@ export class WebController {
       has_openrouter_key: !!c.openrouter_api_key,
       has_webui_token: !!c.webui_token,
       gemini_keys_count: (c.gemini_keys ?? []).length,
-      openrouter_configured: !!(c.openrouter_api_key && c.openrouter_chat_model),
     };
   }
 
@@ -78,7 +77,6 @@ export class WebController {
       memoryModel: c.openrouter_memory_model || '',
       reasoningEffort: c.openrouter_reasoning_effort ?? 'default',
       geminiKeysCount: (c.gemini_keys ?? []).length,
-      openrouterConfigured: !!(c.openrouter_api_key && c.openrouter_chat_model),
     };
   }
 

@@ -1,5 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { UrlContext, UrlEnricherPort } from '../domain/ports/url-enricher.port';
+/** Contexto extraído de la primera URL de un texto. */
+export interface UrlContext {
+  text: string | null;
+  thumbnailData: Buffer | null;
+  thumbnailMime: string | null;
+}
 
 // ponytail: sólo oEmbed de YouTube + fallback HTML <title>/<meta description>;
 // el path yt-dlp para metadata se omitió (frágil, caía casi siempre) — el sidecar
@@ -62,11 +66,4 @@ export async function getUrlContext(
   } catch {
   }
   return empty;
-}
-
-@Injectable()
-export class UrlEnricherAdapter extends UrlEnricherPort {
-  enrich(userText: string): Promise<UrlContext> {
-    return getUrlContext(userText);
-  }
 }

@@ -4,7 +4,7 @@ import * as path from 'path';
 import { atomicWrite } from '../../../common/util';
 import { MemoryQueuePort } from '../../domain/ports/memory.ports';
 
-export const QUEUE_FILE = 'data/memory/queue.json';
+const QUEUE_FILE = 'data/memory/queue.json';
 
 const QUEUE_TO_PERMANENT_DELAY_SECONDS = 300;
 const QUEUE_DUPLICATE_WINDOW_SECONDS = 10;
@@ -61,12 +61,8 @@ export class MemoryQueueAdapter extends MemoryQueuePort {
 
   private async saveQueue(queue: QueueItem[]): Promise<void> {
     await fs.mkdir(path.dirname(QUEUE_FILE), { recursive: true });
-    const safe: QueueItem[] = [];
-    for (const item of queue) {
-      const s = normalizeQueueItem(item);
-      if (s) safe.push(s);
-    }
-    await atomicWrite(QUEUE_FILE, JSON.stringify(safe, null, 2));
+    // Los ítems ya vienen normalizados (loadQueue al leer, addToQueue al crear).
+    await atomicWrite(QUEUE_FILE, JSON.stringify(queue, null, 2));
   }
 
   async addToQueue(user_id: string, text: any): Promise<void> {
@@ -80,12 +76,10 @@ export class MemoryQueueAdapter extends MemoryQueuePort {
       const now = Date.now() / 1000;
 
       // Dedupe rápida (10s): evita duplicados inmediatos por reintentos/cancelaciones.
-      for (let i = queue.length - 1; i >= Math.max(0, queue.length - 50); i--) {
-        const item = queue[i];
-        if (item.user_id === uid && item.text === t && now - item.timestamp <= QUEUE_DUPLICATE_WINDOW_SECONDS) {
-          return;
-        }
-      }
+      const duplicate = queue
+        .slice(-50)
+        .some((i) => i.user_id === uid && i.text === t && now - i.timestamp <= QUEUE_DUPLICATE_WINDOW_SECONDS);
+      if (duplicate) return;
 
       queue.push({ user_id: uid, text: t, timestamp: now });
       await this.saveQueue(queue);

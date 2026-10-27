@@ -45,7 +45,6 @@ function makeController() {
   const logTee = { text: vi.fn(() => '2026-10-05T03:54:40Z WARN [SidecarAdapter] falló') } as any;
   const stats = {
     rankings: vi.fn(() => ({
-      windowHours: 24,
       totals: { messages: 7, aiCalls: 3, tokensIn: 80, tokensOut: 8, tokensCached: 30, cost: 0.7 },
       prev: { messages: 1, aiCalls: 0, tokensIn: 10, tokensOut: 1, tokensCached: 0, cost: 0 },
       series: [],
@@ -118,17 +117,11 @@ describe('WebController — api/status', () => {
     expect(s.provider).toBe('openrouter');
     expect(s.chatModel).toBe('anthropic/claude-x');
     expect(s.geminiKeysCount).toBe(2);
-    expect(s.openrouterConfigured).toBe(true);
     expect(s.bot.connected).toBe(true);
     const json = JSON.stringify(s);
     expect(json).not.toContain('tokensecreto');
     expect(json).not.toContain('sk-secreta');
     expect(json).not.toContain('secreto-ui');
-  });
-
-  it('sin chat_model de OpenRouter → openrouterConfigured false', async () => {
-    const { ctl } = makeController();
-    expect(ctl.status().openrouterConfigured).toBe(false);
   });
 });
 

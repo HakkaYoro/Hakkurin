@@ -18,7 +18,6 @@ from typing import Any
 
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
 
 YTDL_OPTS = {
     "format": "bestaudio/best",
@@ -35,9 +34,6 @@ YTDL_OPTS = {
 }
 
 app = FastAPI(title="hakkurin yt-dlp sidecar")
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
 
 
 def _extract(url: str) -> dict[str, Any]:

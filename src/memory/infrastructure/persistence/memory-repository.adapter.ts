@@ -8,8 +8,8 @@ import { MemoryRepositoryPort } from '../../domain/ports/memory.ports';
 // Memorias .enc (AES-256-GCM) + espejo plano de resúmenes.
 // Ante archivo corrupto: borrar .enc + espejo .txt y devolver memoria vacía.
 
-export const MEMORY_DIR = 'data/memory/users';
-export const SUMMARY_DIR = 'data/memory/summaries';
+const MEMORY_DIR = 'data/memory/users';
+const SUMMARY_DIR = 'data/memory/summaries';
 
 @Injectable()
 export class MemoryRepositoryAdapter extends MemoryRepositoryPort {

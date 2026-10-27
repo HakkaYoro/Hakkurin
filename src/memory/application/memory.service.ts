@@ -32,7 +32,7 @@ export class MemoryService implements OnModuleInit {
     const text = String(interactionText).trim();
     if (!text) return false;
 
-    const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id), user_id);
+    const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id));
     const shouldSummarize = agg.appendInteraction(text, user_id === BOT_SELF_ID);
     await this.repo.saveMemory(user_id, agg.raw);
     return shouldSummarize;
@@ -74,7 +74,7 @@ export class MemoryService implements OnModuleInit {
     newSummary: string | null,
     processedInteractions?: string[] | null,
   ): Promise<void> {
-    const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id), user_id);
+    const agg = UserMemoryAggregate.fromRaw(await this.repo.getMemory(user_id));
     agg.applySummary(newSummary, processedInteractions);
     await this.repo.saveMemory(user_id, agg.raw);
     await this.repo.saveSummaryPlaintext(user_id, agg.raw.summary);

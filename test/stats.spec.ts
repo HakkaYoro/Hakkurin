@@ -50,7 +50,6 @@ describe('StatsService — contadores por usuario/comando/modelo', () => {
     svc.addTokens(10, 2, 0, 0); // sin modelo → no entra en models
 
     const r = svc.rankings(1); // ventana = la hora en curso
-    expect(r.windowHours).toBe(1);
     expect(r.totals.messages).toBe(3);
     expect(r.totals.tokensIn).toBe(110);
     expect(r.totals.cost).toBeCloseTo(0.01);

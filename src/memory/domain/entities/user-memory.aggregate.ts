@@ -19,7 +19,7 @@ export interface UserMemory {
   last_channel_id: number | null;
 }
 
-export function createEmptyMemory(): UserMemory {
+function createEmptyMemory(): UserMemory {
   return {
     profile: { name: '', personality_traits: [], likes: [], dislikes: [], speaking_style: '' },
     interaction_count: 0,
@@ -32,11 +32,11 @@ export function createEmptyMemory(): UserMemory {
   };
 }
 
-export function isStrIntFloat(v: any): boolean {
+function isStrIntFloat(v: any): boolean {
   return typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint';
 }
 
-export function normalizeMemorySchema(raw: any): UserMemory {
+function normalizeMemorySchema(raw: any): UserMemory {
   const mem = !raw || typeof raw !== 'object' ? {} : raw;
   const normalized = createEmptyMemory();
   Object.assign(normalized, mem);
@@ -89,13 +89,10 @@ const SUMMARY_TRIGGER_INTERACTIONS = 20;
 const SELF_TRIGGER_INTERACTIONS = 5;
 
 export class UserMemoryAggregate {
-  private constructor(
-    private readonly mem: UserMemory,
-    private readonly ownerId: string | null,
-  ) {}
+  private constructor(private readonly mem: UserMemory) {}
 
-  static fromRaw(raw: any, userId?: string): UserMemoryAggregate {
-    return new UserMemoryAggregate(normalizeMemorySchema(raw), userId ?? null);
+  static fromRaw(raw: any): UserMemoryAggregate {
+    return new UserMemoryAggregate(normalizeMemorySchema(raw));
   }
 
   get raw(): UserMemory {

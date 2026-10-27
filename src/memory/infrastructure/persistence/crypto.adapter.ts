@@ -7,7 +7,7 @@ import { EncryptorPort } from '../../domain/ports/memory.ports';
 // Formato del .enc: iv(12) || authTag(16) || ciphertext, todo Buffer.
 // La clave vive en data/memory/secret.key (base64 de 32 bytes), 0600, gitignored.
 
-export const KEY_FILE = 'data/memory/secret.key';
+const KEY_FILE = 'data/memory/secret.key';
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 const TAG_LEN = 16;

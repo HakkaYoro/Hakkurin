@@ -12,7 +12,7 @@ import { SleepService } from './sleep.service';
 import { IncomingMessage } from '../domain/incoming-message';
 import { BotStatePort } from '../domain/ports/bot-state.port';
 import { MessageTransportPort } from '../domain/ports/message-transport.port';
-import { UrlEnricherPort } from '../domain/ports/url-enricher.port';
+import { getUrlContext } from '../infrastructure/url-enricher';
 import { normalizeResponseContent } from '../../ai/infrastructure/mappers/response-normalize';
 
 /** Símbolo con el que sleepMs rechaza al abortar; DiscordAdapter lo compara en su catch. */
@@ -32,7 +32,6 @@ export class SmartResponseService {
     @Inject(forwardRef(() => MessageTransportPort))
     private readonly transport: MessageTransportPort,
     @Inject(forwardRef(() => BotStatePort)) private readonly state: BotStatePort,
-    @Inject(UrlEnricherPort) private readonly urlEnricher: UrlEnricherPort,
     private readonly stealthDm: StealthDmService,
     private readonly sleep: SleepService,
     private readonly music: MusicService,
@@ -46,11 +45,11 @@ export class SmartResponseService {
     const userText = message.content;
     const isDm = message.guildId === null;
 
-    const channelHistory = this.conversation.getChannelContext(channelId).getFormattedHistory();
+    const channelCtx = this.conversation.getChannelContext(channelId);
+    const channelHistory = channelCtx.getFormattedHistory();
     const activeUserIds = this.conversation.getActiveUsers(channelId, 20);
     for (const id of message.mentionIds) activeUserIds.push(id);
 
-    const channelCtx = this.conversation.getChannelContext(channelId);
     const atts = [...message.attachments].reverse();
     // El spam se evalúa sobre el último adjunto visual (contentType image/*: GIFs
     // incluidos); la descarga/visión sigue limitada a raster (IMAGE_EXT).
@@ -86,7 +85,7 @@ export class SmartResponseService {
 
     const currentPlaying = this.getNowPlaying(message);
 
-    const urlCtx = await this.urlEnricher.enrich(userText);
+    const urlCtx = await getUrlContext(userText);
     let urlContext = urlCtx.text;
     if (!imageData && !imageNote && urlCtx.thumbnailData) {
       imageData = urlCtx.thumbnailData;
@@ -98,7 +97,6 @@ export class SmartResponseService {
       userId,
       userName,
       contextMessages: channelHistory,
-      isSessionActive: true,
       imageData,
       imageMimeType: imageMime,
       imageNote,

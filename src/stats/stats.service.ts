@@ -52,7 +52,6 @@ export interface SeriesPoint {
 }
 
 export interface Rankings {
-  windowHours: number;
   totals: Totals;
   prev: Totals;
   series: SeriesPoint[];
@@ -252,7 +251,6 @@ export class StatsService implements OnModuleDestroy {
     }
 
     return {
-      windowHours: hours,
       totals,
       prev,
       series,

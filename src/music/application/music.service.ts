@@ -78,7 +78,7 @@ export class MusicService {
     this.logger.warn(`VC ${guildId}: ${why}.`);
   }
 
-  async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
+  private async joinVoice(interaction: ChatInputCommandInteraction): Promise<boolean> {
     const vc = this.voiceChannelOf(interaction.member as GuildMember);
     if (!vc) {
       await safeFollowup(interaction, '¡Necesitas estar en un canal de voz para que pueda poner música!');
@@ -126,7 +126,7 @@ export class MusicService {
         const { streamUrl, title } = await this.source.resolve(item, fetchAbort.signal);
         if (s.epoch !== epoch) return; // /stop durante el extract
         if (!streamUrl) throw new Error('No se pudo crear el recurso de audio.');
-        s.startTrack(guildId, item, title);
+        s.startTrack(item, title);
 
         const player = this.ensurePlayer(guildId);
         const played = await this.pipeline.createAndPlay(s, streamUrl, player);
@@ -203,9 +203,10 @@ export class MusicService {
 
   async play(interaction: ChatInputCommandInteraction, url: string): Promise<void> {
     if (!interaction.deferred) await interaction.deferReply().catch(() => {});
-    if (!this.voice.isConnected(interaction.guildId)) {
-      if (!(await this.joinVoice(interaction))) return;
-    }
+    // Siempre ensureConnection: con guard isConnected, una conexión zombi del
+    // manager (reconexión en curso, bot invisible) salta el join y /play
+    // reproduce contra ella en silencio. Idempotente si ya hay conexión sana.
+    if (!(await this.joinVoice(interaction))) return;
     const s = this.state(interaction.guildId);
     s.stopRadio();
     const item = QueueItemVo.from({ type: 'youtube', url });

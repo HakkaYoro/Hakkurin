@@ -17,7 +17,7 @@ const toBool = (v: unknown): unknown => {
   return v;
 };
 
-export const AnalysisResultSchema = z.object({
+const AnalysisResultSchema = z.object({
   intent: z.enum(INTENTS).catch('ignore'),
   response_content: z.preprocess(toStringList, z.array(z.string())),
   is_talking_to_me: z.preprocess(toBool, z.boolean().catch(false)),

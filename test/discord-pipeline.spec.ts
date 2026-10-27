@@ -21,15 +21,18 @@ import {
   SendOptions,
 } from '../src/discord/domain/ports/message-transport.port';
 import { BotStatePort } from '../src/discord/domain/ports/bot-state.port';
-import { UrlContext, UrlEnricherPort } from '../src/discord/domain/ports/url-enricher.port';
 import { HolidayStoreAdapter } from '../src/discord/infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from '../src/discord/infrastructure/persistence/sleep-store.adapter';
+
+// Enriquecedor mockeado: los fixtures no traen URLs en el texto y así el
+// pipeline jamás toca red por enriquecimiento.
+vi.mock('../src/discord/infrastructure/url-enricher', () => ({
+  getUrlContext: async () => ({ text: null, thumbnailData: null, thumbnailMime: null }),
+}));
 
 // Pipeline completo de DiscordAdapter con dependencias reales donde es barato
 // (conversación, memoria cifrada real en tmp, stores de disco, parser) y fakes
 // en los bordes de red (cliente de discord.js, brain, music).
-
-const EMPTY_URL_CTX: UrlContext = { text: null, thumbnailData: null, thumbnailMime: null };
 
 class MockConfig extends ConfigService {
   store: Record<string, any> = { reply_probability: 0 }; // sin trigger aleatorio: determinismo
@@ -114,7 +117,6 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   }
   const transport = new LazyTransport();
   const state = new LazyState();
-  const urlEnricher = { enrich: vi.fn(async () => EMPTY_URL_CTX) } as unknown as UrlEnricherPort;
 
   const stealthDm = new StealthDmService(transport);
   const sleep = new SleepService(new SleepStoreAdapter(), transport);
@@ -123,7 +125,7 @@ function makeService(store: Record<string, any> = {}, brain = makeBrain()) {
   new MemoryEventsListener(events, memory, config).listen(events);
   const smartResponse = new SmartResponseService(
     config, conversation, brain, memory,
-    transport, state, urlEnricher, stealthDm, sleep, music, events,
+    transport, state, stealthDm, sleep, music, events,
   );
   const reminders = new ReminderService(memory, brain, parser, transport);
   const holidays = new HolidayService(memory, brain, transport, new HolidayStoreAdapter());
@@ -213,7 +215,6 @@ describe('DiscordAdapter — pipeline de mensajes', () => {
     const ctx = brain.analyzeInteraction.mock.calls[0][0];
     expect(ctx.userText).toBe('hola');
     expect(ctx.userId).toBe('u1');
-    expect(ctx.isSessionActive).toBe(true);
     expect(ctx.isDm).toBe(false);
     expect(ctx.contextMessages).toEqual(['Alice (ID: u1): hola']);
 

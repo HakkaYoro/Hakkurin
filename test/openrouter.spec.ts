@@ -66,7 +66,6 @@ function ctx(over: Partial<InteractionContext> = {}): InteractionContext {
     userId: '123',
     userName: 'Test',
     contextMessages: [],
-    isSessionActive: false,
     isDm: false,
     currentPlaying: null,
     urlContext: null,

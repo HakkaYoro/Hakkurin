@@ -6,13 +6,11 @@ export interface PlayerHandle {
   state: { status: string };
   play(resource: unknown): void;
   stop(): void;
-  on(event: string, listener: (...args: any[]) => void): unknown;
 }
 
 export interface ConnectionHandle {
   subscribe(player: unknown): unknown;
   destroy(): void;
-  on(event: string, listener: (...args: any[]) => void): unknown;
 }
 
 export interface ChannelHandle {
@@ -172,7 +170,7 @@ export class GuildMusicState {
   }
 
   /** Track en reproducción: actualiza el now-playing. */
-  startTrack(guildId: string, item: QueueItemVo, resolvedTitle?: string): void {
+  startTrack(item: QueueItemVo, resolvedTitle?: string): void {
     if (item.type === 'navidrome') {
       const title = item.title ?? 'Navidrome Stream';
       this.currentArtist = item.artist ?? 'Unknown Artist';

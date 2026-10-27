@@ -96,7 +96,6 @@ export class ConversationService {
             userId: session.userId,
             userName: 'System',
             contextMessages: channelHistory,
-            isSessionActive: true,
             isDm: false,
           });
           if (['complain', 'reply', 'new_topic'].includes(analysis.intent)) {

@@ -1,18 +1,13 @@
 import { gmt4Date } from '../../common/util';
 
-function pad(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
-}
+const pad = (n: number) => String(n).padStart(2, '0');
 
 export function formatGmt4(d: Date): string {
   const n = gmt4Date(d);
   return `${n.getUTCFullYear()}-${pad(n.getUTCMonth() + 1)}-${pad(n.getUTCDate())} ${pad(n.getUTCHours())}:${pad(n.getUTCMinutes())}:${pad(n.getUTCSeconds())} (GMT-4)`;
 }
 
-export function formatGmt4Minute(d: Date): string {
-  const n = gmt4Date(d);
-  return `${n.getUTCFullYear()}-${pad(n.getUTCMonth() + 1)}-${pad(n.getUTCDate())} ${pad(n.getUTCHours())}:${pad(n.getUTCMinutes())}`;
-}
+export const formatGmt4Minute = (d: Date) => formatGmt4(d).slice(0, 16);
 
 export interface InteractionPromptParams {
   systemPrompt: string;
@@ -23,7 +18,6 @@ export interface InteractionPromptParams {
   historyText: string;
   selfMem: string;
   channelType: string;
-  isSessionActive: boolean;
   currentPlaying?: string | null;
   userName: string;
   userId: string;
@@ -46,7 +40,7 @@ FECHA Y HORA ACTUAL: ${p.currentTime}
 TU EDAD: ${p.botAge}
 
 ESTADO ACTUAL:
-- Sesión Activa: ${p.isSessionActive ? 'SÍ' : 'NO'} (Si es SÍ, ya estabas hablando con esta persona).
+- Sesión Activa: SÍ (ya estabas hablando con esta persona).
 - Tipo de Canal: ${p.channelType}
 - Audio/Música sonando ACTUALMENTE en el bot de voz: ${p.currentPlaying || 'En silencio / Nada en reproducción'}
 

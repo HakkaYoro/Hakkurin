@@ -1,4 +1,4 @@
-import { getUrlContext, UrlEnricherAdapter } from '../src/discord/infrastructure/url-enricher.adapter';
+import { getUrlContext } from '../src/discord/infrastructure/url-enricher';
 
 // Enriquecimiento de contexto por URL: oEmbed de YouTube + fallback HTML.
 // fetchImpl inyectable — sin red real.
@@ -77,9 +77,4 @@ it('timeout del fetch → contexto vacío (no cuelga el pipeline)', async () => 
     new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(opts.signal.reason))) as any);
   const ctx = await getUrlContext('https://example.com/lento', { fetchImpl, timeoutMs: 20 });
   expect(ctx.text).toBeNull();
-});
-
-it('UrlEnricherAdapter delega en getUrlContext', async () => {
-  const ctx = await new UrlEnricherAdapter().enrich('hola qué tal');
-  expect(ctx).toEqual({ text: null, thumbnailData: null, thumbnailMime: null });
 });

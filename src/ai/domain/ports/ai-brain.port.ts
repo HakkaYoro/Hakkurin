@@ -3,7 +3,6 @@ export interface InteractionContext {
   userId: string;
   userName: string;
   contextMessages: string[]; // formato "Name (ID: 123): msg"
-  isSessionActive: boolean;
   imageData?: Uint8Array | null; // Buffer es subtipo de Uint8Array
   imageMimeType?: string | null;
   imageNote?: string | null;

@@ -39,9 +39,8 @@ export class StealthDmService {
   scheduleDelayedDms(guildId: string | null, dms: PendingDm[]): void {
     if (!dms.length) return;
     setTimeout(async () => {
-      await new Promise((r) => setTimeout(r, 3000));
       for (const d of dms) await this.sendStealthDm(d.targetUid, d.msg, guildId);
-    }, 0);
+    }, 3000);
   }
 
   /** Nunca lanza; sólo loguea el éxito. */

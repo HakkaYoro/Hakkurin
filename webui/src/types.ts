@@ -18,7 +18,6 @@ export interface StatusInfo {
   memoryModel: string;
   reasoningEffort: string;
   geminiKeysCount: number;
-  openrouterConfigured: boolean;
 }
 
 export interface AppConfig {
@@ -44,7 +43,6 @@ export interface AppConfig {
   has_openrouter_key: boolean;
   has_webui_token: boolean;
   gemini_keys_count: number;
-  openrouter_configured: boolean;
 }
 
 export type ConfigDraft = AppConfig & {
@@ -54,16 +52,6 @@ export type ConfigDraft = AppConfig & {
   navidrome_password: string;
   webui_token: string;
 };
-
-export interface DayStat {
-  day: string;
-  messages: number;
-  aiCalls: Record<string, number>;
-  tokensIn: number;
-  tokensOut: number;
-  tokensCached: number;
-  cost: number;
-}
 
 export interface Totals {
   messages: number;
@@ -75,7 +63,6 @@ export interface Totals {
 }
 
 export interface StatsData {
-  windowHours: number;
   totals: Totals;
   prev: Totals;
   series: Array<{ key: string; messages: number; aiCalls: number; tokens: number; cost: number }>;

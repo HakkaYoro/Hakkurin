@@ -1,7 +1,7 @@
-export const LIMIT_RPM = 5;
-export const LIMIT_RPD = 20;
+const LIMIT_RPM = 5;
+const LIMIT_RPD = 20;
 
-export function dayOfYear(d: Date): number {
+function dayOfYear(d: Date): number {
   const start = Date.UTC(d.getUTCFullYear(), 0, 0);
   const now = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   return Math.floor((now - start) / 86_400_000);

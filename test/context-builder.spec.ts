@@ -39,7 +39,6 @@ describe('ContextBuilderService', () => {
       userId: '999',
       userName: 'u',
       contextMessages: [],
-      isSessionActive: false,
       activeUserIds: [],
     } as any);
     expect(calls.summary).toContain('999');
@@ -54,7 +53,6 @@ describe('ContextBuilderService', () => {
       userId: '999',
       userName: 'u',
       contextMessages: [],
-      isSessionActive: false,
       activeUserIds: ['777'],
     } as any);
     expect(calls.memory).toContain('777');
@@ -69,7 +67,6 @@ describe('ContextBuilderService', () => {
       userId: '9',
       userName: 'u',
       contextMessages: msgs,
-      isSessionActive: false,
     } as any);
     expect(prompt).toContain('hola29');
     expect(prompt).not.toContain('hola5');

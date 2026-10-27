@@ -89,7 +89,6 @@ export class ContextBuilderService implements ContextBuilder {
       historyText,
       selfMem,
       channelType,
-      isSessionActive: ctx.isSessionActive,
       currentPlaying: ctx.currentPlaying,
       userName: ctx.userName,
       userId: ctx.userId,

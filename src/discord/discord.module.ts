@@ -7,7 +7,6 @@ import { StealthDmService } from './application/stealth-dm.service';
 import { SleepService } from './application/sleep.service';
 import { SlashCommandsService } from './infrastructure/slash-commands.service';
 import { MusicUiService } from './infrastructure/music-ui.service';
-import { UrlEnricherAdapter } from './infrastructure/url-enricher.adapter';
 import { HolidayStoreAdapter } from './infrastructure/persistence/holiday-store.adapter';
 import { SleepStoreAdapter } from './infrastructure/persistence/sleep-store.adapter';
 import { ActionParserService } from './application/action-parser.service';
@@ -21,7 +20,6 @@ import { BotStatePort } from './domain/ports/bot-state.port';
 import { HolidayStorePort } from './domain/ports/json-store.port';
 import { MessageTransportPort } from './domain/ports/message-transport.port';
 import { SleepStorePort } from './domain/ports/json-store.port';
-import { UrlEnricherPort } from './domain/ports/url-enricher.port';
 
 @Module({
   imports: [ConversationModule, MemoryModule, AiModule, MusicModule, NavidromeModule],
@@ -31,7 +29,6 @@ import { UrlEnricherPort } from './domain/ports/url-enricher.port';
     HolidayService,
     StealthDmService,
     SleepService,
-    UrlEnricherAdapter,
     HolidayStoreAdapter,
     SleepStoreAdapter,
     SlashCommandsService,
@@ -41,7 +38,6 @@ import { UrlEnricherPort } from './domain/ports/url-enricher.port';
     DiscordAdapter,
     { provide: MessageTransportPort, useExisting: DiscordAdapter },
     { provide: BotStatePort, useExisting: DiscordAdapter },
-    { provide: UrlEnricherPort, useExisting: UrlEnricherAdapter },
     { provide: HolidayStorePort, useExisting: HolidayStoreAdapter },
     { provide: SleepStorePort, useExisting: SleepStoreAdapter },
   ],

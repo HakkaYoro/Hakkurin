@@ -17,11 +17,8 @@
     "noImplicitAny": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "types": ["node", "vitest/globals"],
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "dist", "venv", "bot", "core", "web", "sidecar"]
+  "exclude": ["node_modules", "dist", "sidecar"]
 }

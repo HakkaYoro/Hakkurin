@@ -37,7 +37,9 @@ export class YtdlUpdaterService {
         return;
       }
       const base = this.config.sidecarUrl();
-      const version = await this.getJson(`${base}/version`);
+      const vres = await fetch(`${base}/version`, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
+      if (!vres.ok) throw new Error(`HTTP ${vres.status}`);
+      const version = await vres.json();
       if (!version?.installed || !version?.latest) {
         this.logger.warn('Sidecar no reportó versiones (installed/latest); se reintenta en una hora.');
         return;
@@ -92,11 +94,5 @@ export class YtdlUpdaterService {
       }
     }
     this.logger.error('Sidecar NO volvió tras el update de yt-dlp (¿crash-loop?). Revisa `docker logs` del sidecar.');
-  }
-
-  private async getJson(url: string): Promise<any> {
-    const res = await fetch(url, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
   }
 }
