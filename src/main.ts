@@ -32,16 +32,17 @@ async function bootstrap() {
     logTee.error(`uncaughtException: ${err.stack ?? err.message}`);
   });
 
-  // El pacer de 20ms de voz vive en este event-loop: percentiles cada 30s para
-  // correlacionar micro-cortes de audio.
+  // El pacer de 20ms de voz vive en este event-loop: sólo se loguea si hay lag
+  // real (p99 > 50ms) — silencio = sano.
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable();
   // percentiles() devuelve NANOSEGUNDOS (bug de unidades preexistente) → /1e6 para ms.
   setInterval(() => {
-    logTee.log(
-      `[eventloop] p50=${(loop.percentile(50) / 1e6).toFixed(1)}ms ` +
-        `p99=${(loop.percentile(99) / 1e6).toFixed(1)}ms ` +
-        `p99.9=${(loop.percentile(99.9) / 1e6).toFixed(1)}ms`,
+    const p99 = loop.percentile(99) / 1e6;
+    if (p99 <= 50) return;
+    logTee.warn(
+      `[eventloop] p99=${p99.toFixed(1)}ms ` +
+        `p99.9=${(loop.percentile(99.9) / 1e6).toFixed(1)}ms — lag del event-loop`,
     );
   }, 30_000).unref();
 

@@ -82,6 +82,7 @@ export class SlashCommandsService {
 
   private async handleCommand(i: ChatInputCommandInteraction): Promise<void> {
     this.stats.bumpCommand(i.commandName, i.user.id);
+    this.logger.log(`/${i.commandName} — ${i.user.username}`);
     switch (i.commandName) {
       case 'play':
         return this.music.play(i, i.options.getString('url', true));
