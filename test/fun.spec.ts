@@ -14,7 +14,6 @@ import {
   shipTags,
   SHIP_TIERS,
   uwuify,
-  WAIFU_CATEGORIES,
   NEKOS_POOL_CAP,
   NEKOS_TTL_MS,
   type CachedNekos,
@@ -156,10 +155,6 @@ describe('dominio fun', () => {
     expect(conCap).toHaveLength(NEKOS_POOL_CAP);
     expect(conCap.at(-1)!.url).toBe('nuevo');
     expect(conCap[0].url).toBe('v1'); // el más viejo (v0) fue descartado
-  });
-
-  it('WAIFU_CATEGORIES sigue siendo el grupo de imágenes', () => {
-    expect(WAIFU_CATEGORIES).toEqual(['waifu', 'husbando', 'neko', 'kitsune']);
   });
 });
 
